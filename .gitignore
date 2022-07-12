@@ -1,3 +1,6 @@
+# Custom
+src/SciTech2022_inference.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
