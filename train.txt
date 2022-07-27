@@ -1,0 +1,34 @@
+Divergences:
+
+- type of estimator
+- how to obtain samples of the parameters
+    - sample from prior
+    - sample from posterior
+    - importance sampling estimators...
+- reuse of model parameters
+    - use same set of theta between inner loops
+    - use same set of theta between operating conditions
+- reuse of nuisance parameters
+- electric field calculation
+- batch size
+- batch v sequential
+- noise model
+
+1st run assumptions
+- gaussian noise model
+- 1 operating condition, 1 output
+- use same set of thetas from Collin's posterior for inner/outer
+- previous sim results for electric field
+- same set of nuisance params for all marginalizations
+
+2nd run assumptions
+- run on gpu
+- works without nuisance params
+- can resample nuisance params for each theta
+
+3rd run assumptions
+- can resample theta and eta for inner loop
+
+4th run assumptions
+- can detect memory overflow and switch to memory mapped mode
+- uncertainty in operating conditions (nuisance param is additive noise)

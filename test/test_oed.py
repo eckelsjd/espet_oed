@@ -5,7 +5,7 @@ from numba import jit, prange
 import matplotlib.pyplot as plt
 import time
 
-from SciTech2022_inference import current_model
+from lib.SciTech2022_inference import current_model
 from esi_surrogate import forward
 
 """

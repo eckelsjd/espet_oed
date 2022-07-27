@@ -1,5 +1,5 @@
 # Custom
-src/SciTech2022_inference.py
+#lib/SciTech2022_inference.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -17,7 +17,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+#lib/
 lib64/
 parts/
 sdist/
