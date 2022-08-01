@@ -1,0 +1,17 @@
+name: espet_39
+channels:
+  - defaults
+dependencies:
+  - jupyter
+  - matplotlib
+  - notebook
+  - numpy=1.22.3
+  - onnx
+  - pip
+  - python=3.9.12
+  - scipy=1.7.3
+  - pip:
+    - onnxruntime
+    - pandas
+    - salib
+prefix: C:\Users\eckel\anaconda3\envs\espet_39
