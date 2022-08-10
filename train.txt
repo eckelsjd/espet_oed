@@ -11,9 +11,9 @@ Divergences:
 - batch v sequential
 - noise model
 
-
 4th run assumptions
-- accept batch size as argument
-- detect memory allocation and break to give warning
 - look into numerical issues
-- uncertainty in operating conditions (nuisance param is additive noise)
+
+Other estimators
+- Gaussian approx + linearized model -> analytical solution
+- layered multiple importance sampling

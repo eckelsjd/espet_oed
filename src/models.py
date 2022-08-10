@@ -79,7 +79,6 @@ def nonlinear_model(x, theta):
     return model_eval  # (*, Nx, y_dim)
 
 
-# noinspection DuplicatedCode
 def electrospray_current_model_gpu(x, theta, eta):
     """ MEMORY-HEAVY O(1) runtime, O(5GB/process) memory
     Predicts total array current for an electrospray thruster

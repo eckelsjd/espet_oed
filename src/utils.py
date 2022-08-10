@@ -1,8 +1,49 @@
 import numpy as np
-import cupy as cp
+import psutil
+import resource
+import sys
+import time
+import logging
 
 
-def batch_normal_pdf(x, mu, cov, use_gpu=False):
+def log_memory_usage(interval_sec):
+    while True:
+        # Log memory usage
+        mem = psutil.virtual_memory()
+        used_gb = mem.used / (1024 ** 3)
+        total_gb = mem.total / (1024 ** 3)
+        remaining = mem.available * 100 / mem.total
+        logging.info(f'  {remaining:.1f}% RAM available ({used_gb:.2f}/{total_gb:.2f} GB used)')
+
+        # Sleep
+        time.sleep(interval_sec)
+
+
+def memory(percentage=1):
+    def decorator(func):
+
+        def wrapper(*args, **kwargs):
+            # Limit memory usage
+            logging.info(f'Memory percentage requested: {percentage * 100:.1f} %')
+            soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+            maxbytes = int(psutil.virtual_memory().available * percentage)
+            resource.setrlimit(resource.RLIMIT_AS, (maxbytes, hard))
+            logging.info(f'Setting memory limit to: {maxbytes / (1024 ** 3):.2f} GB')
+            try:
+                return func(*args, **kwargs)
+            except MemoryError:
+                mem = psutil.virtual_memory()
+                used_gb = mem.used / (1024 ** 3)
+                total_gb = mem.total / (1024 ** 3)
+                remaining = mem.available * 100 / mem.total
+                sys.stderr.write('\n\nERROR: Memory Exception\n')
+                logging.critical(f'Remaining RAM: {remaining:.1f} %  ({used_gb:.2f}/{total_gb:.2f} GB used)')
+                sys.exit(1)
+        return wrapper
+    return decorator
+
+
+def batch_normal_pdf(x, mu, cov):
     """
     Compute the multivariate normal pdf at each x location.
     Dimensions
@@ -14,7 +55,6 @@ def batch_normal_pdf(x, mu, cov, use_gpu=False):
     x: (*, d) location to compute the multivariate normal pdf
     mu: (*, d) mean values to use at each x location
     cov: (d, d) covariance matrix, assumed same at all locations
-    use_gpu: whether to execute on gpu
     Returns
     -------
     pdf: (*) the multivariate normal pdf at each x location
@@ -33,8 +73,8 @@ def batch_normal_pdf(x, mu, cov, use_gpu=False):
     if len(mu.shape) == 1:
         mu = mu[:, np.newaxis]
 
-    # assert cov.shape[0] == cov.shape[1] == dim
-    # assert x.shape[-1] == mu.shape[-1] == dim
+    assert cov.shape[0] == cov.shape[1] == dim
+    assert x.shape[-1] == mu.shape[-1] == dim
 
     # Normalizing constant (scalar)
     preexp = 1 / ((2*np.pi)**(dim/2) * np.linalg.det(cov)**(1/2))
@@ -42,26 +82,13 @@ def batch_normal_pdf(x, mu, cov, use_gpu=False):
     # Can broadcast x - mu with x: (1, Nr, Nx, d) and mu: (Ns, Nr, Nx, d)
     diff = x - mu
 
-    if use_gpu:
-        # Move to GPU memory
-        diff = cp.asarray(diff, dtype=cp.float32)
-        cov = cp.asarray(cov, dtype=cp.float32)
+    # In exponential
+    diff_col = diff.reshape((*diff.shape, 1))  # (*, d, 1)
+    diff_row = diff.reshape((*diff.shape[:-1], 1, diff.shape[-1]))  # (*, 1, d)
+    inexp = np.squeeze(diff_row @ np.linalg.inv(cov) @ diff_col, axis=(-1, -2))  # (*, 1, d) x (*, d, 1) = (*, 1, 1)
 
-        # In exponential
-        diff_col = diff.reshape((*diff.shape, 1))                       # (*, d, 1)
-        diff_row = diff.reshape((*diff.shape[:-1], 1, diff.shape[-1]))  # (*, 1, d)
-        inexp = cp.squeeze(diff_row @ cp.linalg.inv(cov) @ diff_col, axis=(-1, -2))  # (*, 1, d) x (*, d, 1) = (*, 1, 1)
-
-        # Compute pdf
-        pdf = cp.asnumpy(preexp * cp.exp(-1 / 2 * inexp))
-    else:
-        # In exponential
-        diff_col = diff.reshape((*diff.shape, 1))  # (*, d, 1)
-        diff_row = diff.reshape((*diff.shape[:-1], 1, diff.shape[-1]))  # (*, 1, d)
-        inexp = np.squeeze(diff_row @ np.linalg.inv(cov) @ diff_col, axis=(-1, -2))  # (*, 1, d) x (*, d, 1) = (*, 1, 1)
-
-        # Compute pdf
-        pdf = preexp * np.exp(-1 / 2 * inexp)
+    # Compute pdf
+    pdf = preexp * np.exp(-1 / 2 * inexp)
 
     return pdf.astype(np.float32)
 
