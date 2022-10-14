@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import psutil
-import resource
+# import resource
 import logging
 
 from src.models import electrospray_current_model_cpu, nonlinear_model, linear_gaussian_model, linear_gaussian_eig
@@ -137,8 +137,8 @@ def test_array_current_model(dim=1):
     var = np.max(exp_data[2, :])
 
     # Set sample sizes
-    N = 1000
-    Nx = 100
+    N = 500
+    Nx = 20
     M1 = 100
     M2 = 100
     n_jobs = -1

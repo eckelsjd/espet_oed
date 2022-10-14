@@ -15,4 +15,6 @@ dependencies:
     - onnxruntime
     - pandas
     - salib
+    - joblib
+    - psutil
 prefix: C:\Users\eckel\anaconda3\envs\espet_39

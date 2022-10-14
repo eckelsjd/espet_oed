@@ -1,5 +1,7 @@
 import numpy as np
-import cupy as cp
+# import cupy as cp
+
+from src.utils import fix_input_shape
 
 
 # Test estimator on Linear-Gaussian model
@@ -56,21 +58,41 @@ def linear_gaussian_eig(d, var):
 
 
 # Simple nonlinear model example
-def nonlinear_model(x, theta):
-    # theta: (*, Nx, theta_dim)
-    shape = theta.shape[:-2]
+def nonlinear_model(x, theta, eta=None):
+    """Compute nonlinear model paper from Marzouk (2011)
+    Parameters
+    ----------
+    x: (Nx, x_dim) Input locations
+    theta: (*, Nx, theta_dim) Model parameters
+    eta: (*, Nx, eta_dim) No nuisance parameters for this model (UNUSED)
+
+    Returns
+    -------
+    y: (*, Nx, y_dim) The model output, where y_dim = x_dim
+    """
+    # Fix input shapes
+    theta = np.atleast_1d(theta)
+    if len(theta.shape) == 1:
+        theta = np.expand_dims(theta, axis=0)
+    x = fix_input_shape(x)
+    shape = theta.shape[:-1]
     theta_dim = theta.shape[-1]
     Nx, x_dim = x.shape
     y_dim = x_dim  # one output per x_dim
     assert theta_dim == 1
-    assert theta.shape[-2] == Nx
+    assert (theta.shape[-2] == Nx or theta.shape[-2] == 1)
     theta = np.squeeze(theta, axis=-1)            # (*, Nx)
-    x = x.reshape((1,)*len(shape) + (Nx, x_dim))  # (...1, Nx, x_dim)
+    x = x.reshape((1,)*(len(shape)-1) + (Nx, x_dim))  # (...1, Nx, x_dim)
 
-    model_eval = np.zeros((*shape, Nx, y_dim), dtype=np.float32)
+    if len(shape) == 1:
+        model_eval = np.zeros((Nx, y_dim), dtype=np.float32)
+    elif len(shape) > 1:
+        model_eval = np.zeros((*(shape[:-1]), Nx, y_dim), dtype=np.float32)
+
+    # Compute model along each x_dim
     for i in range(x_dim):
         # Select all x for each x_dim
-        ind = tuple([slice(None)]*(len(shape) + 1) + [i])  # slice(None) == : indexing
+        ind = tuple([slice(None)]*(len(shape)) + [i])  # slice(None) == : indexing
         x_i = x[ind]  # (...1, Nx)
 
         # Evaluate model for the x_i dimension
