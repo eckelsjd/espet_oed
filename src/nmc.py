@@ -1,8 +1,6 @@
 # Nested monte carlo estimators
 
 import numpy as np
-from pathlib import Path
-import shutil
 from joblib import Parallel, delayed
 from threading import Thread
 import tempfile
@@ -69,6 +67,7 @@ def eig_nmc(x_loc, theta_sampler, model, N=100, M=100, noise_cov=1.0, reuse_samp
 
     # Expected information gain
     eig = np.mean(np.log(likelihood) - np.log(evidence), axis=0)    # (Nx,)
+    eig = np.nan_to_num(eig, nan=0, posinf=0, neginf=0)
 
     # Clean up
     del theta_i
@@ -83,14 +82,13 @@ def eig_nmc(x_loc, theta_sampler, model, N=100, M=100, noise_cov=1.0, reuse_samp
     return eig
 
 
-# Nested monte carlo expected information gain estimator
+# Nested monte carlo expected information gain estimator (pseudomarginal)
 # @memory(percentage=1.1)
 def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, noise_cov=np.asarray(1.0),
                reuse_samples=False, n_jobs=1, batch_size=-1):
     # Get problem dimension
     noise_cov = np.atleast_1d(noise_cov).astype(np.float32)
     y_dim = noise_cov.shape[0]
-    mmap_folder = Path('./mmap_tmp')
 
     # Experimental operating conditions x
     x_loc = fix_input_shape(x_loc)                              # (Nx, x_dim)
@@ -104,21 +102,26 @@ def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, 
     del theta_temp
     del eta_temp
 
-    # Allocate space
-    try:
-        os.mkdir(mmap_folder)
-    except FileExistsError:
+    # Create temporary files for data
+    with tempfile.NamedTemporaryFile(suffix='.dat', mode='w+b', delete=False) as theta_fd, \
+            tempfile.NamedTemporaryFile(suffix='.dat', mode='w+b', delete=False) as eta_fd, \
+            tempfile.NamedTemporaryFile(suffix='.dat', mode='w+b', delete=False) as y_fd, \
+            tempfile.NamedTemporaryFile(suffix='.dat', mode='w+b', delete=False) as g_theta_fd, \
+            tempfile.NamedTemporaryFile(suffix='.dat', mode='w+b', delete=False) as likelihood_fd, \
+            tempfile.NamedTemporaryFile(suffix='.dat', mode='w+b', delete=False) as evidence_fd:
         pass
-    theta_i = np.memmap(str(mmap_folder/'theta_mmap.dat'), dtype='float32', mode='w+', shape=(N, Nx, theta_dim))
-    eta_i = np.memmap(str(mmap_folder/'eta_mmap.dat'), dtype='float32', mode='w+', shape=(N, Nx, eta_dim))
-    y_i = np.memmap(str(mmap_folder/'y_mmap.dat'), dtype='float32', mode='w+', shape=(N, Nx, y_dim))
-    g_theta_i = np.memmap(str(mmap_folder/'g_theta_mmap.dat'), dtype='float32', mode='w+', shape=(N, Nx, y_dim))
-    likelihood = np.memmap(str(mmap_folder/'likelihood_mmap.dat'), dtype='float32', mode='w+', shape=(N, Nx))
-    evidence = np.memmap(str(mmap_folder/'evidence_mmap.dat'), dtype='float32', mode='w+', shape=(N, Nx))
+
+    # Allocate space for data
+    theta_i = np.memmap(theta_fd.name, dtype='float32', mode='r+', shape=(N, Nx, theta_dim))
+    eta_i = np.memmap(eta_fd.name, dtype='float32', mode='r+', shape=(N, Nx, eta_dim))
+    y_i = np.memmap(y_fd.name, dtype='float32', mode='r+', shape=(N, Nx, y_dim))
+    g_theta_i = np.memmap(g_theta_fd.name, dtype='float32', mode='r+', shape=(N, Nx, y_dim))
+    likelihood = np.memmap(likelihood_fd.name, dtype='float32', mode='r+', shape=(N, Nx))
+    evidence = np.memmap(evidence_fd.name, dtype='float32', mode='r+', shape=(N, Nx))
 
     # Start memory logging
-    daemon = Thread(target=log_memory_usage, args=(10,), daemon=True, name="Memory logger")
-    daemon.start()
+    # daemon = Thread(target=log_memory_usage, args=(10,), daemon=True, name="Memory logger")
+    # daemon.start()
 
     # Sample parameters
     theta_i[:] = theta_sampler((N, Nx)).astype(np.float32)      # (N, Nx, theta_dim)
@@ -174,10 +177,21 @@ def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, 
     # Expected information gain
     eig = np.mean(np.log(likelihood) - np.log(evidence), axis=0)    # (Nx,)
 
+    # If the likelihood or evidence are 0, np.log -> -inf, but eig -> 0
+    eig = np.nan_to_num(eig, nan=0, posinf=0, neginf=0)
+
     # Clean up
-    try:
-        shutil.rmtree(mmap_folder)
-    except:
-        pass
+    del theta_i
+    del eta_i
+    del y_i
+    del g_theta_i
+    del likelihood
+    del evidence
+    os.remove(theta_fd.name)
+    os.remove(eta_fd.name)
+    os.remove(y_fd.name)
+    os.remove(g_theta_fd.name)
+    os.remove(likelihood_fd.name)
+    os.remove(evidence_fd.name)
 
     return eig

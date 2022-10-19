@@ -34,12 +34,12 @@ def test_nonlinear_model(test_1d=True, test_2d=False):
     if test_1d:
         theta_sampler = lambda shape: np.random.rand(*shape, 1)
         N = 10000
-        M = 1000
+        M = 5000
         Nx = 50
         x_loc = np.linspace(0, 1, Nx).reshape((Nx, 1))
         var = 1e-4
         t1 = time.time()
-        eig = eig_nmc(x_loc, theta_sampler, nonlinear_model, N=N, M=M, noise_cov=var, reuse_samples=False, n_jobs=1)
+        eig = eig_nmc(x_loc, theta_sampler, nonlinear_model, N=N, M=M, noise_cov=var, reuse_samples=False, n_jobs=-1)
         t2 = time.time()
         print(f'Total time: {t2-t1:.2f} s')
 
@@ -134,25 +134,27 @@ def test_array_current_model(dim=1):
         return eta.astype(np.float32)
 
     exp_data = np.loadtxt('../data/training_data.txt', dtype=np.float32, delimiter='\t')
-    var = np.max(exp_data[2, :])
+    var = 2 * np.max(exp_data[2, :])
 
     # Set sample sizes
     N = 500
-    Nx = 20
-    M1 = 100
-    M2 = 100
+    Nx = 40
+    M1 = 300
+    M2 = 300
     n_jobs = -1
     bs = -1
 
     if dim == 1:
         x_loc = np.linspace(800, 1840, Nx).reshape((Nx, 1))
         eig = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, electrospray_current_model_cpu, N=N, M1=M1, M2=M2,
-                         noise_cov=var, reuse_samples=True, n_jobs=n_jobs, batch_size=bs)
+                         noise_cov=var, reuse_samples=False, n_jobs=n_jobs, batch_size=bs)
         plt.figure()
         plt.plot(x_loc, eig, '-k')
         plt.xlabel('Voltage [V]')
         plt.ylabel('Expected information gain')
         plt.show()
+
+        return eig
 
     if dim == 2:
         Ngrid = [Nx, Nx]
@@ -177,6 +179,8 @@ def test_array_current_model(dim=1):
         plt.xlabel('$Voltage 1 [V]$')
         plt.ylabel('$Voltage 2 [V]$')
         plt.show()
+
+        return eig
 
 
 # @memory(percentage=1.1)
@@ -203,5 +207,8 @@ def test_memory_usage():
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     # test_linear_gaussian_model(N=800, M1=800, M2=800, reuse_samples=False)
-    test_array_current_model(dim=1)
+    eig = test_array_current_model(dim=1)
+    print(eig)
+    print('The end')
     # test_memory_usage()
+    # test_nonlinear_model(test_1d=True, test_2d=False)

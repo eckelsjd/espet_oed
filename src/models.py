@@ -288,8 +288,8 @@ def electrospray_current_model_cpu(x, theta, eta):
         # Extract emitter geometries
         geo_data = eta[i, :, 7:].reshape((Nx, Ne, 7))
         curvature_radius = geo_data[:, :, 0]                        # (Nx, Ne)
-        # gap_distance = geo_data[:, :, 1]
-        # aperture_radius = geo_data[:, :, 2]
+        gap_distance = geo_data[:, :, 1]
+        aperture_radius = geo_data[:, :, 2]
         half_angle = geo_data[:, :, 3]
         emitter_height = geo_data[:, :, 4]
         loc_pore_radius = geo_data[:, :, 5]
