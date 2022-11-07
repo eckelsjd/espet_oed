@@ -25,12 +25,18 @@ def linear_gaussian_model(x, theta, eta):
     -------
     g_theta: (*, Nx, y_dim) model output
     """
+    x = fix_input_shape(x)
     Nx, x_dim = x.shape
+    theta = np.atleast_1d(theta)
+    if len(theta.shape) == 1:
+        theta = np.expand_dims(theta, axis=0)
+    eta = np.atleast_1d(eta)
+    if len(eta.shape) == 1:
+        eta = np.expand_dims(eta, axis=0)
     theta_shape = theta.shape[:-2]
     theta_dim = theta[-1]
     eta_shape = eta.shape[:-2]
     eta_dim = eta[-1]
-    assert theta.shape[-2] == eta.shape[-2] == Nx
     y_dim = 2
 
     x = x.reshape((1,) * len(eta_shape) + (Nx, x_dim))  # (...1, Nx, x_dim)
@@ -81,8 +87,18 @@ def nonlinear_model(x, theta, eta=None):
     y_dim = x_dim  # one output per x_dim
     assert theta_dim == 1
     assert (theta.shape[-2] == Nx or theta.shape[-2] == 1)
-    theta = np.squeeze(theta, axis=-1)            # (*, Nx)
+    theta = np.squeeze(theta, axis=-1)                # (*, Nx)
     x = x.reshape((1,)*(len(shape)-1) + (Nx, x_dim))  # (...1, Nx, x_dim)
+
+    # Modify the model with eta, if passed in
+    if eta:
+        eta = np.atleast_1d(eta)
+        if len(eta.shape) == 1:
+            eta = np.expand_dims(eta, axis=0)
+            eta_dim = eta.shape[-1]
+            assert eta_dim == 1
+            assert (eta.shape[-2] == Nx or eta.shape[-2] == 1)
+            eta = np.squeeze(eta, axis=-1)  # (*, Nx)
 
     if len(shape) == 1:
         model_eval = np.zeros((Nx, y_dim), dtype=np.float32)
@@ -96,7 +112,10 @@ def nonlinear_model(x, theta, eta=None):
         x_i = x[ind]  # (...1, Nx)
 
         # Evaluate model for the x_i dimension
-        model_eval[ind] = np.square(x_i) * np.power(theta, 3) + np.exp(-abs(0.2 - x_i)) * theta  # (*, Nx)
+        if eta:
+            model_eval[ind] = np.square(x_i) * np.power(eta, 3) + np.exp(-abs(0.2 - x_i)) * theta  # (*, Nx)
+        else:
+            model_eval[ind] = np.square(x_i) * np.power(theta, 3) + np.exp(-abs(0.2 - x_i)) * theta  # (*, Nx)
 
     return model_eval  # (*, Nx, y_dim)
 

@@ -10,7 +10,7 @@ from src.utils import batch_normal_sample, batch_normal_pdf, fix_input_shape, me
 
 
 # Nested monte carlo expected information gain estimator
-def eig_nmc(x_loc, theta_sampler, model, N=100, M=100, noise_cov=1.0, reuse_samples=False, n_jobs=1):
+def eig_nmc(x_loc, theta_sampler, model, N=100, M=100, noise_cov=1.0, reuse_samples=False, n_jobs=1, ppool=None):
     # Get problem dimension
     noise_cov = np.atleast_1d(noise_cov).astype(np.float32)
     y_dim = noise_cov.shape[0]
@@ -60,7 +60,10 @@ def eig_nmc(x_loc, theta_sampler, model, N=100, M=100, noise_cov=1.0, reuse_samp
             print(f'Samples processed: {idx + 1} out of {N}')
 
     # Compute evidence p(y|d)
-    Parallel(n_jobs=n_jobs, verbose=5)(delayed(parallel_func)(idx, y_i, g_theta_i, evidence) for idx in range(N))
+    if ppool is None:
+        Parallel(n_jobs=n_jobs, verbose=1)(delayed(parallel_func)(idx, y_i, g_theta_i, evidence) for idx in range(N))
+    else:
+        ppool(delayed(parallel_func)(idx, y_i, g_theta_i, evidence) for idx in range(N))
 
     # Compute likelihood
     likelihood = batch_normal_pdf(y_i, g_theta_i, noise_cov)        # (N, Nx)

@@ -1,9 +1,14 @@
 import numpy as np
 import psutil
-# import resource
+import resource
 import sys
 import time
 import logging
+from numpy.linalg.linalg import LinAlgError
+import scipy.optimize
+from matplotlib.pyplot import cycler
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap
+import matplotlib.cm
 
 
 def log_memory_usage(interval_sec):
@@ -43,6 +48,138 @@ def memory(percentage=1):
     return decorator
 
 
+def get_cycle(cmap, N=None, use_index="auto"):
+    if isinstance(cmap, str):
+        if use_index == "auto":
+            if cmap in ['Pastel1', 'Pastel2', 'Paired', 'Accent',
+                        'Dark2', 'Set1', 'Set2', 'Set3',
+                        'tab10', 'tab20', 'tab20b', 'tab20c']:
+                use_index = True
+            else:
+                use_index = False
+        cmap = matplotlib.cm.get_cmap(cmap)
+    if not N:
+        N = cmap.N
+    if use_index == "auto":
+        if cmap.N > 100:
+            use_index = False
+        elif isinstance(cmap, LinearSegmentedColormap):
+            use_index = False
+        elif isinstance(cmap, ListedColormap):
+            use_index = True
+    if use_index:
+        ind = np.arange(int(N)) % cmap.N
+        return cycler("color", cmap(ind))
+    else:
+        colors = cmap(np.linspace(0, 1, N))
+        return cycler("color", colors)
+
+
+def effective_sample_size(Nsamples, auto_corr):
+    """Compute the effective MCMC sample size
+    :param Nsamples: Number of MCMC samples
+    :param auto_corr: (maxlag, ndim) Autocorrelation, R(l) for lag = 1 to inf, or R(l[-1]) ~ 0
+    """
+    IAC = 1 + 2*np.sum(auto_corr, axis=0)
+    ESS = Nsamples / IAC
+    return ESS
+
+
+def autocorrelation(samples, maxlag=100, step=1):
+    """Compute the correlation of a set of samples
+    :param samples: (Nsamples, dim)
+    :param maxlag: maximum distance to compute the correlation for
+    :param step: step between distances from 0 to maxlag for which to compute the correlations
+    """
+    # Get the shapes
+    nsamples, ndim = samples.shape
+
+    # Compute the mean
+    mean = np.mean(samples, axis=0)
+
+    # Compute the variance for each parameter
+    var = np.sum((samples - mean[np.newaxis, :]) ** 2, axis=0)
+
+    lags = np.arange(0, maxlag, step)
+    autos = np.zeros((len(lags), ndim))
+    for zz, lag in enumerate(lags):
+        autos[zz, :] = np.zeros((ndim))
+        # compute the covariance between all samples *lag apart*
+        for ii in range(nsamples - lag):
+            autos[zz, :] = autos[zz, :] + (samples[ii, :] - mean) * (samples[ii + lag, :] - mean)
+        autos[zz, :] = autos[zz, :] / var
+    return lags, autos
+
+
+def laplace_approx(x0, logpost):
+    """Perform the laplace approximation, returning the MAP point and an approximation of the covariance
+    :param x0: (nparam, ) array of initial parameters
+    :param logpost: f(param) -> log posterior pdf
+
+    :returns map_point: (nparam, ) MAP of the posterior
+    :returns cov_approx: (nparam, nparam), covariance matrix for Gaussian fit at MAP
+    """
+    # Gradient free method to obtain optimum
+    neg_post = lambda x: -logpost(x)
+    res = scipy.optimize.minimize(neg_post, x0, method='Nelder-Mead')
+
+    # Gradient method which also approximates the inverse of the hessian
+    res = scipy.optimize.minimize(neg_post, res.x*0.95)
+    map_point = res.x
+    cov_approx = res.hess_inv
+    return map_point, cov_approx
+
+
+def log_posterior_unnorm():
+    pass
+
+
+def is_positive_definite(B):
+    """Returns true when input is positive-definite, via Cholesky"""
+    try:
+        _ = np.linalg.cholesky(B)
+        return True
+    except LinAlgError:
+        return False
+
+
+def nearest_positive_definite(A):
+    """Find the nearest positive-definite matrix to input
+    A Python/Numpy port of John D'Errico's `nearestSPD` MATLAB code [1], which
+    credits [2].
+    [1] https://www.mathworks.com/matlabcentral/fileexchange/42885-nearestspd
+    [2] N.J. Higham, "Computing a nearest symmetric positive semidefinite
+    matrix" (1988): https://doi.org/10.1016/0024-3795(88)90223-6
+    """
+
+    B = (A + A.T) / 2
+    _, s, V = np.linalg.svd(B)
+    H = np.dot(V.T, np.dot(np.diag(s), V))
+    A2 = (B + H) / 2
+    A3 = (A2 + A2.T) / 2
+    if is_positive_definite(A3):
+        return A3
+
+    spacing = np.spacing(np.linalg.norm(A))
+    # The above is different from [1]. It appears that MATLAB's `chol` Cholesky
+    # decomposition will accept matrixes with exactly 0-eigenvalue, whereas
+    # Numpy's will not. So where [1] uses `eps(mineig)` (where `eps` is Matlab
+    # for `np.spacing`), we use the above definition. CAVEAT: our `spacing`
+    # will be much larger than [1]'s `eps(mineig)`, since `mineig` is usually on
+    # the order of 1e-16, and `eps(1e-16)` is on the order of 1e-34, whereas
+    # `spacing` will, for Gaussian random matrixes of small dimension, be on
+    # othe order of 1e-16. In practice, both ways converge, as the unit test
+    # below suggests.
+    I = np.eye(A.shape[0])
+    k = 1
+    while not is_positive_definite(A3):
+        mineig = np.min(np.real(np.linalg.eigvals(A3)))
+        A3 += I * (-mineig * k ** 2 + spacing)
+        k += 1
+
+    return A3
+
+
 def batch_normal_pdf(x, mu, cov):
     """
     Compute the multivariate normal pdf at each x location.
@@ -69,9 +206,9 @@ def batch_normal_pdf(x, mu, cov):
     if dim == 1:
         cov = cov[:, np.newaxis]    # (1, 1)
     if len(x.shape) == 1:
-        x = x[:, np.newaxis]
+        x = x[np.newaxis, :]
     if len(mu.shape) == 1:
-        mu = mu[:, np.newaxis]
+        mu = mu[np.newaxis, :]
 
     assert cov.shape[0] == cov.shape[1] == dim
     assert x.shape[-1] == mu.shape[-1] == dim
@@ -113,7 +250,7 @@ def batch_normal_sample(mean, cov, size: "tuple | int" = ()):
     if dim == 1:
         cov = cov[:, np.newaxis]    # (1, 1)
     if len(mean.shape) == 1:
-        mean = mean[:, np.newaxis]
+        mean = mean[np.newaxis, :]
 
     assert cov.shape[0] == cov.shape[1] == dim
     assert mean.shape[-1] == dim

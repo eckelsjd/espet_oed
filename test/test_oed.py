@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import psutil
-# import resource
+import resource
 import logging
 
 from src.models import electrospray_current_model_cpu, nonlinear_model, linear_gaussian_model, linear_gaussian_eig
@@ -183,7 +183,7 @@ def test_array_current_model(dim=1):
         return eig
 
 
-# @memory(percentage=1.1)
+@memory(percentage=1.1)
 def test_memory_usage():
     print('In main: \n')
     mem = psutil.virtual_memory()
@@ -207,8 +207,8 @@ def test_memory_usage():
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     # test_linear_gaussian_model(N=800, M1=800, M2=800, reuse_samples=False)
-    eig = test_array_current_model(dim=1)
-    print(eig)
-    print('The end')
+    # eig = test_array_current_model(dim=1)
+    # print(eig)
+    # print('The end')
     # test_memory_usage()
     # test_nonlinear_model(test_1d=True, test_2d=False)
