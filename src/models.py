@@ -34,9 +34,9 @@ def linear_gaussian_model(x, theta, eta):
     if len(eta.shape) == 1:
         eta = np.expand_dims(eta, axis=0)
     theta_shape = theta.shape[:-2]
-    theta_dim = theta[-1]
+    theta_dim = theta.shape[-1]
     eta_shape = eta.shape[:-2]
-    eta_dim = eta[-1]
+    eta_dim = eta.shape[-1]
     y_dim = 2
 
     x = x.reshape((1,) * len(eta_shape) + (Nx, x_dim))  # (...1, Nx, x_dim)
@@ -50,7 +50,8 @@ def linear_gaussian_model(x, theta, eta):
     y1 = x * theta                          # (*, Nx) or (1, Nx)
     if y1.shape[0] == 1:
         # If reusing samples of theta
-        y1 = np.tile(y1, (*eta_shape, 1))   # (*, Nx)
+        tile_axis = (eta_shape[0],) + (1,)*(len(eta_shape)-1) + (1,)  # (*, 1..., 1), only tile on first axis of eta
+        y1 = np.tile(y1, tile_axis)         # (*, Nx)
 
     y2 = (1 - x) * eta                      # (*, Nx)
 

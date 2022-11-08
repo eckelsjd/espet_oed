@@ -212,3 +212,4 @@ if __name__ == '__main__':
     # print('The end')
     # test_memory_usage()
     # test_nonlinear_model(test_1d=True, test_2d=False)
+    test_mse()

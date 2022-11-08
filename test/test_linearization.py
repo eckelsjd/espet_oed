@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 
-from src.utils import fix_input_shape
+from src.utils import fix_input_shape, linear_eig
 from src.models import nonlinear_model
 from src.nmc import eig_nmc
 
@@ -73,44 +73,6 @@ def linearize_model(model, d, theta_L, eta):
     delta = A @ np.expand_dims(theta_L, axis=-1)    # (*, Nx, y_dim, 1)
     c = f_L - np.squeeze(delta, axis=-1)            # (*, Nx, y_dim)
     return A, c
-
-
-def linear_eig(A, sigma, gamma):
-    """Computes the analytical expected information gain for a linear gaussian model
-    Model: Y = A*theta + c + xi,  where
-           A -> system matrix
-           theta -> model parameters, theta ~ N(mu, sigma)
-           c -> constant offset
-           xi -> experimental noise, xi ~ N(b, gamma)
-    Parameters
-    ----------
-    A: (*, y_dim, theta_dim) System matrices of length * and shape (y_dim, theta_dim)
-    sigma: (*, theta_dim, theta_dim) Prior covariance matrix on model parameters
-    gamma: (*, y_dim, y_dim) Experimental noise covariance
-
-    Returns
-    -------
-    eig: (*,) The expected information gain for each system
-    """
-    A = np.atleast_1d(A)
-    sigma = np.atleast_1d(sigma)
-    gamma = np.atleast_1d(gamma)
-    if len(A.shape) == 2:
-        shape = (1,)
-        A = np.expand_dims(A, axis=0)
-        sigma = np.expand_dims(sigma, axis=0)
-        gamma = np.expand_dims(gamma, axis=0)
-    else:
-        shape = A.shape[:-2]
-    A_T = np.transpose(A, axes=tuple([0]*len(shape)) + (-1, -2))
-
-    # Posterior covariance
-    C_inv = np.linalg.inv(A @ sigma @ A_T + gamma)
-    sigma_post = sigma - sigma @ A_T @ C_inv @ A @ sigma    # (*, theta_dim, theta_dim)
-
-    # Compute expected information gain
-    eig = (1/2) * np.log(np.linalg.det(sigma) / np.linalg.det(sigma_post))  # (*,)
-    return eig
 
 
 def test_nonlinear():
