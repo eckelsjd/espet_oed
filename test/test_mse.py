@@ -4,36 +4,64 @@ from matplotlib.ticker import FormatStrFormatter
 from pathlib import Path
 
 from src.utils import linear_eig, ax_default, get_cycle
-from src.models import linear_gaussian_model
+from src.models import linear_gaussian_model, custom_nonlinear
 from src.nmc import eig_nmc_pm
 
 
-def test_nmc_linear():
-    """Test nmc estimators on the linear Gaussian model"""
-    # Simulation parameters
-    N_MC = 100  # number of MC replicates
-    N_to_M = np.array([0.01, 0.1, 1, 10, 100])
-    # N_to_M = np.array([1/100, 1/10, 1, 10, 100])  # N:M sample ratios
-    N_est = N_to_M.shape[0]  # number of estimators to compare
-    Nx = 50  # number of input locations
-    d = np.linspace(0, 1, Nx)
-    N_cost = 6  # number of total costs (i.e. number of model evaluations)
+def test_nmc(model='linear'):
+    """Test nmc estimators on the specified model"""
+    # Testing parameters
+    N_MC = 100                                  # number of MC replicates
+    N_to_M = np.array([0.01, 0.1, 1, 10, 100])  # N:M sample ratios
+    N_est = N_to_M.shape[0]                     # number of estimators to compare
+    N_cost = 6                                  # number of total costs (i.e. number of model evaluations)
     cost = np.floor(np.logspace(4, 6, N_cost))
+
+    # Model-specific (Specify d, Nx, theta_sampler, eta_sampler, eig_truth, gamma, model_func)
+    Nx = 0; d=None; theta_sampler=None; eta_sampler=None; eig_truth=None; gamma=0; model_func=None
+    if model == 'linear':
+        Nx = 50
+        d = np.linspace(0, 1, Nx)
+        theta_sampler = lambda shape: np.random.randn(*shape, 1)
+        eta_sampler = lambda shape: np.random.randn(*shape, 1)
+        model_func = linear_gaussian_model
+
+        # Generate ground truth comparison
+        y_dim = 2
+        A = np.zeros((Nx, y_dim, 1))
+        A[:, 0, 0] = d
+        sigma = np.array([[[1]]])
+        eps_var = 0.01
+        gamma = eps_var * np.eye(y_dim)
+        eig_truth = linear_eig(A, sigma, np.expand_dims(gamma, axis=0))  # (Nx,)
+        eig_truth = np.expand_dims(eig_truth, axis=0)  # (1, Nx)
+
+    elif model == 'nonlinear':
+        Nx = 50
+        d = np.linspace(0, 1, Nx)
+        std = 0.25; mean = 0.5
+        theta_sampler = lambda shape: np.random.randn(*shape, 1)*std + mean
+        eta_sampler = lambda shape: np.random.randn(*shape, 1)*std + mean
+        model_func = custom_nonlinear
+
+        # Generate ground truth comparison (high-fidelity NMC)
+        N = 1000
+        M = 10000
+        Nr = 50
+        gamma = 0.01
+        eig_estimate = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M,
+                                  noise_cov=gamma, reuse_samples=False, n_jobs=-1, replicates=Nr)  # (N_MC, Nx)
+        eig_truth = np.nanmean(eig_estimate, axis=0).reshape((1, Nx))
+
+    elif model == 'electrospray':
+        raise NotImplementedError('Working on this')
+    else:
+        raise NotImplementedError('Not working with whatever model you specified')
 
     # Allocate space
     eig_store = np.zeros((N_est, N_cost, N_MC, Nx), dtype=np.float32)
     mse_store = np.zeros((N_est, N_cost, N_MC), dtype=np.float32)
     real_cost = np.zeros((N_est, N_cost))  # due to rounding issues, actual cost will be different
-
-    # Generate ground truth comparison
-    y_dim = 2
-    A = np.zeros((Nx, y_dim, 1))
-    A[:, 0, 0] = d
-    sigma = np.array([[[1]]])
-    eps_var = 0.01
-    gamma = eps_var * np.eye(y_dim)
-    eig_truth = linear_eig(A, sigma, np.expand_dims(gamma, axis=0))  # (Nx,)
-    eig_truth = np.expand_dims(eig_truth, axis=0)   # (1, Nx)
 
     # Loop over each estimator
     for i, nm_ratio in enumerate(N_to_M):
@@ -50,22 +78,20 @@ def test_nmc_linear():
             real_cost[i, j] = 2*N*M
 
             # Run NMC estimator
-            theta_sampler = lambda shape: np.random.randn(*shape, 1)
-            eta_sampler = lambda shape: np.random.randn(*shape, 1)
-            eig_estimate = eig_nmc_pm(d, theta_sampler, eta_sampler, linear_gaussian_model, N=N, M1=M, M2=M,
-                                      noise_cov=gamma, reuse_samples=False, n_jobs=1, replicates=N_MC)  # (N_MC, Nx)
+            eig_estimate = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M,
+                                      noise_cov=gamma, reuse_samples=False, n_jobs=-1, replicates=N_MC)  # (N_MC, Nx)
             # Filter arithmetic underflow
             eig_store[i, j, :, :] = np.nan_to_num(eig_estimate, posinf=np.nan, neginf=np.nan)
             mse_store[i, j, :] = np.nanmean((eig_store[i, j, :, :] - eig_truth) ** 2, axis=-1)  # (N_MC,)
 
     # Save results
-    np.savez(Path('../results/nmc_linear.npz'), d=d, eig=eig_store, mse=mse_store, eig_truth=eig_truth,
+    np.savez(Path('../results')/f'nmc_{model}.npz', d=d, eig=eig_store, mse=mse_store, eig_truth=eig_truth,
              cost=real_cost, N2M=N_to_M)
 
 
-def plot_nmc_linear():
+def plot_nmc(model='linear'):
     # Load data from npz file
-    data = np.load(str(Path('../results/nmc_linear.npz')))
+    data = np.load(str(Path('../results')/f'nmc_{model}.npz'))
 
     eig_store = data['eig']
     eig_truth = data['eig_truth']
@@ -114,10 +140,12 @@ def plot_nmc_linear():
     fig.text(0.02, 0.5, r'Expected information gain', va='center', fontweight='bold', rotation='vertical')
     fig.set_size_inches(N_cost*2.5, N_est*2.5)
     fig.tight_layout(pad=3, w_pad=1, h_pad=1)
+    fig.savefig(str(Path('../results/figs') / f'{model}_N2M_cost_eig.png'), dpi=100, format='png')
     plt.show()
 
     # Plot MSE log plot
     mse_store = data['mse']  # (N_est, N_cost, N_MC)
+    # mse = np.nanmean((eig_store - eig_truth.reshape((1, 1, 1, Nx)))**2, axis=(-2, -1))  # (N_est, N_cost)
     fig, ax = plt.subplots()
     colors = get_cycle("tab10", N=6)
     ax.set_prop_cycle(color=colors.by_key()['color'], marker=['o', 'D', '^', 's', '*', 'X'])
@@ -130,6 +158,7 @@ def plot_nmc_linear():
         std_err = np.sqrt(var/N_MC)
         plt.errorbar(cost[i, :], mean_mse, yerr=std_err, linestyle='-',
                      markersize=4, linewidth=1.5, capsize=2, label=label)
+        # plt.plot(cost[i, :], mse[i, :], linestyle='-', markersize=4, linewidth=1.5, label=label)
     ax.set_xlabel(r'Model evaluations ($C=2NM$)')
     ax.set_ylabel(r'Estimator MSE')
     ax.grid()
@@ -142,9 +171,10 @@ def plot_nmc_linear():
     ax.set_yscale('log')
     ax.set_xscale('log')
     fig.tight_layout()
+    fig.savefig(str(Path('../results/figs') / f'{model}_mse.png'), dpi=100, format='png')
     plt.show()
 
 
 if __name__ == '__main__':
-    test_nmc_linear()
-    plot_nmc_linear()
+    # test_nmc(model='nonlinear')
+    plot_nmc(model='linear')

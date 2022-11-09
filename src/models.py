@@ -121,6 +121,70 @@ def nonlinear_model(x, theta, eta=None):
     return model_eval  # (*, Nx, y_dim)
 
 
+def custom_nonlinear(x, theta, eta=None, env_var=0.1**2, wavelength=0.5, wave_amp=0.1, tanh_amp=0.5, tanh_shift=4):
+    """Custom nonlinear model
+    Parameters
+    ----------
+    x: (Nx, x_dim) Input locations
+    theta: (*, Nx, theta_dim) Model parameters
+    eta: (*, Nx, eta_dim) Nuisance parameters
+    env_var: Variance of Gaussian envelope
+    wavelength: Sinusoidal perturbation wavelength
+    wave_amp: Amplitude of perturbation
+    tanh_amp: Amplitude of tanh(x)
+    tanh_shift: Shift factor of tanh(2*shift*x - shift)
+
+    Returns
+    -------
+    y: (*, Nx, y_dim) The model output, where y_dim = x_dim
+    """
+    x = fix_input_shape(x)
+    Nx, x_dim = x.shape
+    theta = np.atleast_1d(theta)
+    if len(theta.shape) == 1:
+        theta = np.expand_dims(theta, axis=0)
+
+    if eta is None:
+        # Eta is passed in as second theta dimension (for joint EIG)
+        eta = np.expand_dims(theta[..., 1], axis=-1)
+        theta = np.expand_dims(theta[..., 0], axis=-1)
+    else:
+        eta = np.atleast_1d(eta)
+        if len(eta.shape) == 1:
+            eta = np.expand_dims(eta, axis=0)
+    theta_shape = theta.shape[:-2]
+    theta_dim = theta.shape[-1]
+    eta_shape = eta.shape[:-2]
+    eta_dim = eta.shape[-1]
+    y_dim = x_dim
+    assert y_dim == x_dim == 1
+
+    x = x.reshape((1,) * len(eta_shape) + (Nx, x_dim))  # (...1, Nx, x_dim)
+    model_eval = np.zeros((*eta_shape, Nx, y_dim), dtype=np.float32)
+
+    # 1 model param, 1 nuisance param and 1 input location
+    x = np.squeeze(x, axis=-1)  # (...1, Nx)
+    theta = np.squeeze(theta, axis=-1)  # (*, Nx)
+    eta = np.squeeze(eta, axis=-1)  # (*, Nx)
+
+    # Traveling sinusoid with moving Gaussian envelope
+    env_range = [0.2, 0.6]
+    mu = env_range[0] + theta * (env_range[1] - env_range[0])
+    theta_env = 1 / (np.sqrt(2 * np.pi * env_var)) * np.exp(-0.5 * (x - mu) ** 2 / env_var)
+    ftheta = wave_amp * np.sin((2*np.pi/wavelength) * theta) * theta_env
+
+    # Underlying tanh dependence on x
+    fd = tanh_amp * np.tanh(2*tanh_shift*x - tanh_shift) + tanh_amp
+
+    # Perturbations at x=1 from nuisance variable
+    eta_env = 1 / (np.sqrt(2 * np.pi * env_var)) * np.exp(-0.5 * (x - 1) ** 2 / env_var)
+    feta = wave_amp * np.sin((2*np.pi/(0.25*wavelength)) * eta) * eta_env
+
+    # Compute model = f(theta, d) + f(d)
+    y = np.expand_dims(ftheta + fd + feta, axis=-1)
+    return y  # (*, Nx, y_dim)
+
+
 def electrospray_current_model_gpu(x, theta, eta):
     """ MEMORY-HEAVY O(1) runtime, O(5GB/process) memory
     Predicts total array current for an electrospray thruster

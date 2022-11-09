@@ -127,7 +127,7 @@ def ax_default(ax, xlabel='', ylabel='', legend=True):
     ax.tick_params(axis='x', direction='in')
     ax.tick_params(axis='y', direction='in')
     if legend:
-        leg = plt.legend()
+        leg = plt.legend(fancybox=True)
         frame = leg.get_frame()
         frame.set_edgecolor('k')
 

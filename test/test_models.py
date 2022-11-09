@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
-from src.models import linear_gaussian_model, nonlinear_model
+from src.models import linear_gaussian_model, custom_nonlinear
 from src.utils import get_cycle
 
 
@@ -18,6 +19,35 @@ def test_linear_gaussian_model():
     plt.xlabel(r'Operating condition $d$')
     plt.ylabel(r'Model output $y$')
     plt.legend()
+    plt.show()
+
+
+def test_custom_nonlinear():
+    N = 100
+    d = np.linspace(0, 1, N)
+    theta = np.linspace(0, 1, N)
+    pt_grids = np.meshgrid(d, theta)
+    x_loc = np.vstack([grid.ravel() for grid in pt_grids]).T  # (np.prod(Nx), x_dim)
+    x = x_loc[:, 0, np.newaxis]
+    t = x_loc[:, 1, np.newaxis]
+    eta = np.ones(t.shape)*(1/8)*0
+
+    y = custom_nonlinear(x, t, eta)
+
+    # Reform grids
+    dg, tg = [x_loc[:, i].reshape((N, N)) for i in range(2)]  # reform grids
+    yg = y.reshape((N, N))
+
+    fig, ax = plt.subplots()
+    c = ax.contourf(dg, tg, yg, 60, cmap='jet')
+    plt.colorbar(c, label='Model output $y$')
+    ax.tick_params(axis='x', direction='in')
+    ax.tick_params(axis='y', direction='in')
+    ax.set_xlabel(r'Operating condition $d$')
+    ax.set_ylabel(r'Model parameter $\theta$')
+    fig.set_size_inches(4.8, 3.6)
+    plt.tight_layout()
+    fig.savefig(str(Path('../results/figs') / 'nonlinear_model_contour.png'), dpi=100, format='png')
     plt.show()
 
 
@@ -54,4 +84,5 @@ if __name__ == '__main__':
     plt.rc('ytick', labelsize='small')
 
     # test_linear_gaussian_model()
-    test_nonlinear_model()
+    # test_nonlinear_model()
+    test_custom_nonlinear()

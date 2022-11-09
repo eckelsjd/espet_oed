@@ -1,14 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-import psutil
-import resource
 import logging
+from pathlib import Path
 
 from src.models import electrospray_current_model_cpu, nonlinear_model, linear_gaussian_model, linear_gaussian_eig
-from src.models import electrospray_current_model_gpu
+from src.models import custom_nonlinear
 from src.nmc import eig_nmc_pm, eig_nmc
-from src.utils import model_1d_batch, memory
+from src.utils import model_1d_batch, ax_default
 
 
 def test_linear_gaussian_model(N, M1=100, M2=100, Nx=50, var=0.01, reuse_samples=False):
@@ -183,33 +182,51 @@ def test_array_current_model(dim=1):
         return eig
 
 
-@memory(percentage=1.1)
-def test_memory_usage():
-    print('In main: \n')
-    mem = psutil.virtual_memory()
-    start_gb = mem.used / (1024 ** 3)
-    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    process_gb = soft / (1024 ** 3)
-    total_gb = mem.total / (1024 ** 3)
+def test_custom_nonlinear():
+    Nx = 50
+    d = np.linspace(0, 1, Nx)
+    std = 0.25
+    mean = 0.5
+    N = 223
+    M = 2230
+    Nr = 50
+    gamma = 0.01
+    model_func = custom_nonlinear
 
-    ml = []
-    for j in range(26):
-        arr = np.random.rand(10000, 5000).astype(np.float64)  # 381.5 MB
-        ml.append(arr)
-        mem = psutil.virtual_memory()
-        used_gb = mem.used / (1024 ** 3)
-        remaining = mem.available * 100 / mem.total
-        proc_remain = (1 - ((used_gb - start_gb) / process_gb)) * 100
-        print(f'Iteration {j}: Total remaining RAM: {remaining:.1f} %  ({used_gb:.2f}/{total_gb:.2f} GB used)   ' 
-              f'Process remaining RAM: {proc_remain:.1f} % ({used_gb-start_gb:.2f}/{process_gb:.2f} process GB used)')
+    # Marginal
+    theta_sampler = lambda shape: np.random.randn(*shape, 1) * std + mean
+    eta_sampler = lambda shape: np.random.randn(*shape, 1) * std + mean
+    eig_estimate_pm = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M,
+                                 noise_cov=gamma, reuse_samples=False, n_jobs=-1, replicates=Nr)  # (Nr, Nx)
+    eig_lb_pm = np.nanpercentile(eig_estimate_pm, 5, axis=0)
+    eig_med_pm = np.nanpercentile(eig_estimate_pm, 50, axis=0)
+    eig_ub_pm = np.nanpercentile(eig_estimate_pm, 95, axis=0)
+
+    # Joint
+    theta_sampler = lambda shape: np.random.randn(*shape, 2) * std + mean
+    eig_estimate_joint = eig_nmc(d, theta_sampler, model_func, N=N, M=M, noise_cov=gamma, reuse_samples=False,
+                                 n_jobs=-1, replicates=Nr)  # (Nr, Nx)
+    eig_lb_joint = np.nanpercentile(eig_estimate_joint, 5, axis=0)
+    eig_med_joint = np.nanpercentile(eig_estimate_joint, 50, axis=0)
+    eig_ub_joint = np.nanpercentile(eig_estimate_joint, 95, axis=0)
+
+    fig, ax = plt.subplots()
+    ax.plot(d, eig_med_joint, '-k', label=r'Joint')
+    ax.fill_between(d, eig_lb_joint, eig_ub_joint, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='gray')
+    ax.plot(d, eig_med_pm, '-r', label=r'Marginal')
+    ax.fill_between(d, eig_lb_pm, eig_ub_pm, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
+    ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
+    ax.set_xlim(left=0, right=1)
+    ax.set_ylim(bottom=-0.01)
+    fig.set_size_inches(4.8, 3.6)
+    plt.tight_layout()
+    fig.savefig(str(Path('../results/figs')/'nonlinear_joint_marg_eig.png'), dpi=100, format='png')
+    plt.show()
 
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     # test_linear_gaussian_model(N=800, M1=800, M2=800, reuse_samples=False)
     # eig = test_array_current_model(dim=1)
-    # print(eig)
-    # print('The end')
-    # test_memory_usage()
     # test_nonlinear_model(test_1d=True, test_2d=False)
-    test_mse()
+    test_custom_nonlinear()
