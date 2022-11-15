@@ -52,6 +52,48 @@ def memory(percentage=1):
     return decorator
 
 
+def approx_hessian(func, d, theta, eta=None, pert=0.01):
+    """Approximate Hessian of the function at a specified theta location
+    Parameters
+    ----------
+    func: expects to be called as func(d, theta, eta), returns (*, Nx, y_dim)
+    d: (Nx, x_dim) model input locations
+    theta: (*, theta_dim) point to linearize model about
+    eta: (*, Nx, eta_dim) nuisance parameters needed to run the model, or None
+    pert: Perturbation for approximate partial derivatives
+
+    Returns
+    -------
+    J: (*, Nx, y_dim, theta_dim) The approximate Hessian (y_dim, theta_dim) at locations (*, Nx)
+    """
+    f = func(d, theta, eta)         # (*, Nx, y_dim)
+    shape = theta.shape[:-1]        # (*)
+    theta_dim = theta.shape[-1]     # Number of parameters
+    Nx, x_dim = d.shape             # Dimension of input
+    y_dim = f.shape[-1]             # Dimension of output
+    dtheta = pert * theta
+
+    # Return a Hessian (y_dim, theta_dim) at locations (*, Nx)
+    H = 0
+    if len(shape) == 1:
+        H = np.zeros((Nx, y_dim, theta_dim))
+    elif len(shape) > 1:
+        H = np.zeros((*(shape[:-1]), Nx, y_dim, theta_dim))
+    ind = tuple([slice(None)] * len(shape))  # (*)
+
+    for k in range(theta_dim):
+        # Center difference scheme to approximate partial derivatives
+        theta_forward = np.copy(theta)
+        theta_backward = np.copy(theta)
+        theta_forward[(*ind, k)] += dtheta[(*ind, k)]
+        theta_backward[(*ind, k)] -= dtheta[(*ind, k)]
+        f1 = func(d, theta_forward, eta)    # (*, Nx, y_dim)
+        f2 = func(d, theta_backward, eta)   # (*, Nx, y_dim)
+        H[(*ind, slice(None), k)] = (f1 - 2*f + f2) / np.expand_dims(dtheta[(*ind, k)], axis=-1) ** 2
+
+    return H
+
+
 def linear_eig(A, sigma, gamma):
     """Computes the analytical expected information gain for a linear gaussian model
     Model: Y = A*theta + c + xi,  where
@@ -187,10 +229,6 @@ def laplace_approx(x0, logpost):
     return map_point, cov_approx
 
 
-def log_posterior_unnorm():
-    pass
-
-
 def is_positive_definite(B):
     """Returns true when input is positive-definite, via Cholesky"""
     try:
@@ -237,7 +275,7 @@ def nearest_positive_definite(A):
     return A3
 
 
-def batch_normal_pdf(x, mu, cov):
+def batch_normal_pdf(x, mu, cov, logpdf=False):
     """
     Compute the multivariate normal pdf at each x location.
     Dimensions
@@ -282,7 +320,7 @@ def batch_normal_pdf(x, mu, cov):
     inexp = np.squeeze(diff_row @ np.linalg.inv(cov) @ diff_col, axis=(-1, -2))  # (*, 1, d) x (*, d, 1) = (*, 1, 1)
 
     # Compute pdf
-    pdf = preexp * np.exp(-1 / 2 * inexp)
+    pdf = np.log(preexp) + (-1/2)*inexp if logpdf else preexp * np.exp(-1 / 2 * inexp)
 
     return pdf.astype(np.float32)
 

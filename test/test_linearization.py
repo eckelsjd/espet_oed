@@ -2,51 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 
-from src.utils import fix_input_shape, linear_eig
+from src.utils import fix_input_shape, linear_eig, approx_jacobian
 from src.models import nonlinear_model
 from src.nmc import eig_nmc
-
-
-def approx_jacobian(func, d, theta, eta, pert=0.01):
-    """Approximate Jacobian of the function at a specified theta location
-    Parameters
-    ----------
-    func: expects to be called as func(d, theta, eta), returns (*, Nx, y_dim)
-    d: (Nx, x_dim) model input locations
-    theta: (*, theta_dim) point to linearize model about
-    eta: (*, Nx, eta_dim) nuisance parameters needed to run the model
-    pert: Perturbation for approximate partial derivatives
-
-    Returns
-    -------
-    J: (*, Nx, y_dim, theta_dim) The approximate Jacobian (y_dim, theta_dim) at locations (*, Nx)
-    """
-    f = func(d, theta, eta)         # (*, Nx, y_dim)
-    shape = theta.shape[:-1]        # (*)
-    theta_dim = theta.shape[-1]     # Number of parameters
-    Nx, x_dim = d.shape             # Dimension of input
-    y_dim = f.shape[-1]             # Dimension of output
-    dtheta = pert * theta
-
-    # Return a Jacobian (y_dim, theta_dim) at locations (*, Nx)
-    J = 0
-    if len(shape) == 1:
-        J = np.zeros((Nx, y_dim, theta_dim))
-    elif len(shape) > 1:
-        J = np.zeros((*(shape[:-1]), Nx, y_dim, theta_dim))
-    ind = tuple([slice(None)] * len(shape))  # (*)
-
-    for k in range(theta_dim):
-        # Center difference scheme to approximate partial derivatives
-        theta_forward = np.copy(theta)
-        theta_backward = np.copy(theta)
-        theta_forward[(*ind, k)] += dtheta[(*ind, k)]
-        theta_backward[(*ind, k)] -= dtheta[(*ind, k)]
-        f1 = func(d, theta_forward, eta)    # (*, Nx, y_dim)
-        f2 = func(d, theta_backward, eta)   # (*, Nx, y_dim)
-        J[(*ind, slice(None), k)] = (f1 - f2) / (2*np.expand_dims(dtheta[(*ind, k)], axis=-1))
-
-    return J
 
 
 def linearize_model(model, d, theta_L, eta):

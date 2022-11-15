@@ -4,27 +4,57 @@ import time
 import logging
 from pathlib import Path
 
-from src.models import electrospray_current_model_cpu, nonlinear_model, linear_gaussian_model, linear_gaussian_eig
+from src.models import electrospray_current_model_cpu, nonlinear_model, linear_gaussian_model
 from src.models import custom_nonlinear
 from src.nmc import eig_nmc_pm, eig_nmc
-from src.utils import model_1d_batch, ax_default
+from src.mcla import eig_mcla_pm
+from src.utils import model_1d_batch, ax_default, linear_eig
 
 
-def test_linear_gaussian_model(N, M1=100, M2=100, Nx=50, var=0.01, reuse_samples=False):
+def test_linear_gaussian_model(estimator='nmc'):
     # Linear gaussian model example
+    N = 100
+    M = 100
+    Nx = 50
+    Nr = 100
+    noise_var = 0.01
+    prior_mean = 0
+    prior_cov = 1
     theta_sampler = lambda shape: np.random.randn(*shape, 1)
     eta_sampler = lambda shape: np.random.randn(*shape, 1)
-    noise_cov = np.array([[var, 0], [0, var]])
+    noise_cov = np.array([[noise_var, 0], [0, noise_var]])
     x_loc = np.linspace(0, 1, Nx).reshape((Nx, 1))
-    eig_analytical = linear_gaussian_eig(x_loc, var)
-    eig_estimate = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, linear_gaussian_model, N=N, M1=M1, M2=M2,
-                              noise_cov=noise_cov, reuse_samples=reuse_samples, use_parallel=True)
-    plt.figure()
-    plt.plot(x_loc, eig_analytical, '-k')
-    plt.plot(x_loc, eig_estimate, '--r')
-    plt.xlabel('d')
-    plt.ylabel('Expected information gain')
-    plt.legend((r'Analytical $U(d)$', r'$\hat{U}^{NMC}(d)$'))
+    d = np.squeeze(x_loc)  # (Nx, )
+
+    # Compute analytical EIG
+    y_dim = 2
+    A = np.zeros((Nx, y_dim, 1))
+    A[:, 0, 0] = x_loc[:, 0]
+    sigma = np.array([[[prior_cov]]])
+    eig_truth = linear_eig(A, sigma, np.expand_dims(noise_cov, axis=0))  # (Nx,)
+
+    # Compute estimator EIG
+    if estimator == 'nmc':
+        eig_estimate = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, linear_gaussian_model, N=N, M1=M, M2=M,
+                                  noise_cov=noise_cov, reuse_samples=False, n_jobs=-1, batch_size=-1, replicates=Nr)
+    elif estimator == 'mcla':
+        eig_estimate = eig_mcla_pm(x_loc, theta_sampler, eta_sampler, linear_gaussian_model, prior_mean, prior_cov,
+                                   N=N, M=M, Ne=40, noise_cov=noise_cov, n_jobs=-1, batch_size=-1, replicates=Nr)
+
+    # Compute percentiles over replicates
+    eig_lb = np.nanpercentile(eig_estimate, 5, axis=0)
+    eig_med = np.nanpercentile(eig_estimate, 50, axis=0)
+    eig_ub = np.nanpercentile(eig_estimate, 95, axis=0)
+
+    fig, ax = plt.subplots()
+    ax.plot(d, eig_truth, '-k', label=r'Exact')
+    ax.plot(d, eig_med, '-r', label=r'Estimator')
+    ax.fill_between(d, eig_lb, eig_ub, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
+    ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
+    ax.set_xlim(left=0, right=1)
+    ax.set_ylim(bottom=-0.01)
+    fig.set_size_inches(4.8, 3.6)
+    plt.tight_layout()
     plt.show()
 
 
@@ -226,7 +256,7 @@ def test_custom_nonlinear():
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    # test_linear_gaussian_model(N=800, M1=800, M2=800, reuse_samples=False)
     # eig = test_array_current_model(dim=1)
     # test_nonlinear_model(test_1d=True, test_2d=False)
-    test_custom_nonlinear()
+    # test_custom_nonlinear()
+    test_linear_gaussian_model(estimator='mcla')
