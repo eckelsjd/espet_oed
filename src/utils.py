@@ -52,6 +52,48 @@ def memory(percentage=1):
     return decorator
 
 
+def approx_jacobian(func, d, theta, eta, pert=0.01):
+    """Approximate Jacobian of the function at a specified theta location
+    Parameters
+    ----------
+    func: expects to be called as func(d, theta, eta), returns (*, Nx, y_dim)
+    d: (Nx, x_dim) model input locations
+    theta: (*, theta_dim) point to linearize model about
+    eta: (*, Nx, eta_dim) nuisance parameters needed to run the model
+    pert: Perturbation for approximate partial derivatives
+
+    Returns
+    -------
+    J: (*, Nx, y_dim, theta_dim) The approximate Jacobian (y_dim, theta_dim) at locations (*, Nx)
+    """
+    f = func(d, theta, eta)         # (*, Nx, y_dim)
+    shape = theta.shape[:-1]        # (*)
+    theta_dim = theta.shape[-1]     # Number of parameters
+    Nx, x_dim = d.shape             # Dimension of input
+    y_dim = f.shape[-1]             # Dimension of output
+    dtheta = pert * theta
+
+    # Return a Jacobian (y_dim, theta_dim) at locations (*, Nx)
+    J = 0
+    if len(shape) == 1:
+        J = np.zeros((Nx, y_dim, theta_dim))
+    elif len(shape) > 1:
+        J = np.zeros((*(shape[:-1]), Nx, y_dim, theta_dim))
+    ind = tuple([slice(None)] * len(shape))  # (*)
+
+    for k in range(theta_dim):
+        # Center difference scheme to approximate partial derivatives
+        theta_forward = np.copy(theta)
+        theta_backward = np.copy(theta)
+        theta_forward[(*ind, k)] += dtheta[(*ind, k)]
+        theta_backward[(*ind, k)] -= dtheta[(*ind, k)]
+        f1 = func(d, theta_forward, eta)    # (*, Nx, y_dim)
+        f2 = func(d, theta_backward, eta)   # (*, Nx, y_dim)
+        J[(*ind, slice(None), k)] = (f1 - f2) / (2*np.expand_dims(dtheta[(*ind, k)], axis=-1))
+
+    return J
+
+
 def approx_hessian(func, d, theta, eta=None, pert=0.01):
     """Approximate Hessian of the function at a specified theta location
     Parameters
@@ -64,7 +106,7 @@ def approx_hessian(func, d, theta, eta=None, pert=0.01):
 
     Returns
     -------
-    J: (*, Nx, y_dim, theta_dim) The approximate Hessian (y_dim, theta_dim) at locations (*, Nx)
+    H: (*, Nx, theta_dim, theta_dim) The approximate Hessian (theta_dim, theta_dim) at locations (*, Nx)
     """
     f = func(d, theta, eta)         # (*, Nx, y_dim)
     shape = theta.shape[:-1]        # (*)
@@ -73,23 +115,45 @@ def approx_hessian(func, d, theta, eta=None, pert=0.01):
     y_dim = f.shape[-1]             # Dimension of output
     dtheta = pert * theta
 
-    # Return a Hessian (y_dim, theta_dim) at locations (*, Nx)
+    # Return a Hessian (theta_dim, theta_dim) at locations (*, Nx)
     H = 0
     if len(shape) == 1:
-        H = np.zeros((Nx, y_dim, theta_dim))
+        H = np.zeros((Nx, theta_dim, theta_dim))
     elif len(shape) > 1:
-        H = np.zeros((*(shape[:-1]), Nx, y_dim, theta_dim))
+        H = np.zeros((*(shape[:-1]), Nx, theta_dim, theta_dim))
     ind = tuple([slice(None)] * len(shape))  # (*)
 
-    for k in range(theta_dim):
-        # Center difference scheme to approximate partial derivatives
-        theta_forward = np.copy(theta)
-        theta_backward = np.copy(theta)
-        theta_forward[(*ind, k)] += dtheta[(*ind, k)]
-        theta_backward[(*ind, k)] -= dtheta[(*ind, k)]
-        f1 = func(d, theta_forward, eta)    # (*, Nx, y_dim)
-        f2 = func(d, theta_backward, eta)   # (*, Nx, y_dim)
-        H[(*ind, slice(None), k)] = (f1 - 2*f + f2) / np.expand_dims(dtheta[(*ind, k)], axis=-1) ** 2
+    for i in range(theta_dim):
+        for j in range(i, theta_dim):
+            # Allocate space at 4 grid points (n1=-1, p1=+1)
+            theta_n1_n1 = np.copy(theta)
+            theta_p1_p1 = np.copy(theta)
+            theta_n1_p1 = np.copy(theta)
+            theta_p1_n1 = np.copy(theta)
+
+            # Perturbations to theta in each direction
+            theta_n1_n1[(*ind, i)] -= dtheta[(*ind, i)]
+            theta_n1_n1[(*ind, j)] -= dtheta[(*ind, j)]
+            f_n1_n1 = func(d, theta_n1_n1, eta)
+
+            theta_p1_p1[(*ind, i)] += dtheta[(*ind, i)]
+            theta_p1_p1[(*ind, j)] += dtheta[(*ind, j)]
+            f_p1_p1 = func(d, theta_p1_p1, eta)
+
+            theta_n1_p1[(*ind, i)] -= dtheta[(*ind, i)]
+            theta_n1_p1[(*ind, j)] += dtheta[(*ind, j)]
+            f_n1_p1 = func(d, theta_n1_p1, eta)
+
+            theta_p1_n1[(*ind, i)] += dtheta[(*ind, i)]
+            theta_p1_n1[(*ind, j)] -= dtheta[(*ind, j)]
+            f_p1_n1 = func(d, theta_p1_n1, eta)
+
+            res = (f_n1_n1 + f_p1_p1 - f_n1_p1 - f_p1_n1) / np.expand_dims(4 * dtheta[(*ind, i)] * dtheta[(*ind, j)],
+                                                                           axis=-1)
+
+            # Hessian only computed for scalar functions, y_dim=1 on last axis
+            H[(*ind, i, j)] = np.squeeze(res, axis=-1)
+            H[(*ind, j, i)] = np.squeeze(res, axis=-1)
 
     return H
 

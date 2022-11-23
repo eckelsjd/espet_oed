@@ -5,7 +5,7 @@ from src.utils import fix_input_shape
 
 
 # Test estimator on Linear-Gaussian model
-def linear_gaussian_model(x, theta, eta):
+def linear_gaussian_model(x, theta, eta=None):
     """
     Linear Gaussian model with analytical solution for eig:
     [y1, y2] = [d, 0; 0, 1-d] * [theta, eta]
@@ -30,9 +30,15 @@ def linear_gaussian_model(x, theta, eta):
     theta = np.atleast_1d(theta)
     if len(theta.shape) == 1:
         theta = np.expand_dims(theta, axis=0)
-    eta = np.atleast_1d(eta)
-    if len(eta.shape) == 1:
-        eta = np.expand_dims(eta, axis=0)
+
+    if eta is None:
+        # Eta is passed in as second theta dimension (for joint EIG)
+        eta = np.expand_dims(theta[..., 1], axis=-1)
+        theta = np.expand_dims(theta[..., 0], axis=-1)
+    else:
+        eta = np.atleast_1d(eta)
+        if len(eta.shape) == 1:
+            eta = np.expand_dims(eta, axis=0)
     theta_shape = theta.shape[:-2]
     theta_dim = theta.shape[-1]
     eta_shape = eta.shape[:-2]
@@ -91,16 +97,6 @@ def nonlinear_model(x, theta, eta=None):
     theta = np.squeeze(theta, axis=-1)                # (*, Nx)
     x = x.reshape((1,)*(len(shape)-1) + (Nx, x_dim))  # (...1, Nx, x_dim)
 
-    # Modify the model with eta, if passed in
-    if eta:
-        eta = np.atleast_1d(eta)
-        if len(eta.shape) == 1:
-            eta = np.expand_dims(eta, axis=0)
-            eta_dim = eta.shape[-1]
-            assert eta_dim == 1
-            assert (eta.shape[-2] == Nx or eta.shape[-2] == 1)
-            eta = np.squeeze(eta, axis=-1)  # (*, Nx)
-
     if len(shape) == 1:
         model_eval = np.zeros((Nx, y_dim), dtype=np.float32)
     elif len(shape) > 1:
@@ -113,10 +109,7 @@ def nonlinear_model(x, theta, eta=None):
         x_i = x[ind]  # (...1, Nx)
 
         # Evaluate model for the x_i dimension
-        if eta:
-            model_eval[ind] = np.square(x_i) * np.power(eta, 3) + np.exp(-abs(0.2 - x_i)) * theta  # (*, Nx)
-        else:
-            model_eval[ind] = np.square(x_i) * np.power(theta, 3) + np.exp(-abs(0.2 - x_i)) * theta  # (*, Nx)
+        model_eval[ind] = np.square(x_i) * np.power(theta, 3) + np.exp(-abs(0.2 - x_i)) * theta  # (*, Nx)
 
     return model_eval  # (*, Nx, y_dim)
 
