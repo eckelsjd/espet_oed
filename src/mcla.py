@@ -153,8 +153,8 @@ def eig_mcla(x_loc, theta_sampler, model, prior_mean, prior_cov, N=100, Ne=10, n
             x_curr = x_loc[b_slice, :]                                              # (bs, x_dim)
             bs = x_curr.shape[0]
 
-            # logprior = lambda theta: batch_normal_pdf(theta, prior_mean, prior_cov, logpdf=True)
-            logprior = lambda theta: np.zeros((Nr, bs))  # For a uniform prior U(0, 1)
+            logprior = lambda theta: batch_normal_pdf(theta, prior_mean, prior_cov, logpdf=True)
+            # logprior = lambda theta: np.zeros((Nr, bs))  # For a uniform prior U(0, 1)
             neg_logpost = lambda x, theta, eta: -log_posterior(x, theta, y_curr, model, logprior, noise_cov)
             sigma_inv = approx_hessian(neg_logpost, x_curr, theta_curr)
 
@@ -166,8 +166,16 @@ def eig_mcla(x_loc, theta_sampler, model, prior_mean, prior_cov, N=100, Ne=10, n
             sigma_2_inv = np.linalg.inv(sigma_2)
 
             # Compute Dkl(P1 || P2) == Dkl(Posterior || prior) between two Gaussians
-            dkl = (-1/2)*np.log((2*np.pi)**theta_dim*np.linalg.det(sigma_1)) - theta_dim/2 - logprior(theta_curr)
-            dkl = dkl.reshape((Nr, bs))
+            # gg_h = approx_hessian(lambda x, theta, eta: batch_normal_pdf(theta, prior_mean, prior_cov, logpdf=True),
+            #                       x_curr, theta_curr)
+            # dkl = (-1/2)*np.log((2*np.pi)**(theta_dim)*np.linalg.det(sigma_1)) - theta_dim/2 - logprior(theta_curr) - np.trace()
+            diff_col = mu_1 - mu_2                                  # (Nr, bs, theta_dim, 1)
+            diff_row = np.transpose(diff_col, axes=(0, 1, -1, -2))  # (Nr, bs, 1, theta_dim)
+            dkl = (1/2) * (np.log(np.linalg.det(sigma_2) / np.linalg.det(sigma_1)) +
+                           np.squeeze(diff_row @ sigma_2_inv @ diff_col, axis=(-2, -1)))  # (Nr, bs)
+
+            # dkl = (-1/2)*np.log((2*np.pi)**theta_dim*np.linalg.det(sigma_1)) - theta_dim/2 - logprior(theta_curr)
+            # dkl = dkl.reshape((Nr, bs))
             # diff_col = mu_2 - mu_1                                  # (Nr, bs, theta_dim, 1)
             # diff_row = np.transpose(diff_col, axes=(0, 1, -1, -2))  # (Nr, bs, 1, theta_dim)
             # dkl = (1/2) * (np.log(np.linalg.det(sigma_2) / np.linalg.det(sigma_1)) - theta_dim +
@@ -176,6 +184,7 @@ def eig_mcla(x_loc, theta_sampler, model, prior_mean, prior_cov, N=100, Ne=10, n
 
             # Store result (store a nan for unphysical cases)
             kl_divergence[idx, :, b_slice] = np.nan_to_num(dkl, posinf=np.nan, neginf=np.nan, nan=np.nan)
+            # kl_divergence[idx, :, b_slice] = dkl
 
     # Compute KL divergence in parallel over outer-loop samples N
     if ppool is None:
@@ -278,8 +287,7 @@ def eig_mcla_pm(x_loc, theta_sampler, eta_sampler, model, prior_mean, prior_cov,
             eta_curr = eta_sampler((M, Nr, bs))                                     # (M, Nr, bs, eta_dim)
 
             logprior = lambda theta: batch_normal_pdf(theta, prior_mean, prior_cov, logpdf=True)
-            neg_logpost = lambda x, theta, eta: -log_posterior_pm(x, theta, eta, y_curr, model, logprior, noise_cov,
-                                                               eta_sampler=None)
+            neg_logpost = lambda x, theta, eta: -log_posterior_pm(x, theta, eta, y_curr, model, logprior, noise_cov)
             sigma_inv = approx_hessian(neg_logpost, x_curr, theta_curr, eta=eta_curr)
 
             # Fix shapes of prior (P2) and posterior (P1) Gaussian distributions
@@ -290,11 +298,15 @@ def eig_mcla_pm(x_loc, theta_sampler, eta_sampler, model, prior_mean, prior_cov,
             sigma_2_inv = np.linalg.inv(sigma_2)
 
             # Compute Dkl(P1 || P2) == Dkl(Posterior || prior) between two Gaussians
-            diff_col = mu_2 - mu_1                                  # (Nr, bs, theta_dim, 1)
-            diff_row = np.transpose(diff_col, axes=(0, 1, -1, -2))  # (Nr, bs, 1, theta_dim)
-            dkl = (1/2) * (np.log(np.linalg.det(sigma_2) / np.linalg.det(sigma_1)) - theta_dim +
-                           np.trace(sigma_2_inv @ sigma_1, axis1=-2, axis2=-1) +
-                           np.squeeze(diff_row @ sigma_2_inv @ diff_col, axis=(-2, -1)))  # (Nr, bs)
+            diff_col = mu_1 - mu_2                                      # (Nr, bs, theta_dim, 1)
+            diff_row = np.transpose(diff_col, axes=(0, 1, -1, -2))      # (Nr, bs, 1, theta_dim)
+            dkl = (1 / 2) * (np.log(np.linalg.det(sigma_2) / np.linalg.det(sigma_1)) +
+                             np.squeeze(diff_row @ sigma_2_inv @ diff_col, axis=(-2, -1)))  # (Nr, bs)
+            # diff_col = mu_2 - mu_1                                  # (Nr, bs, theta_dim, 1)
+            # diff_row = np.transpose(diff_col, axes=(0, 1, -1, -2))  # (Nr, bs, 1, theta_dim)
+            # dkl = (1/2) * (np.log(np.linalg.det(sigma_2) / np.linalg.det(sigma_1)) - theta_dim +
+            #                np.trace(sigma_2_inv @ sigma_1, axis1=-2, axis2=-1) +
+            #                np.squeeze(diff_row @ sigma_2_inv @ diff_col, axis=(-2, -1)))  # (Nr, bs)
 
             # Store result (store a nan for unphysical cases)
             kl_divergence[idx, :, b_slice] = np.nan_to_num(dkl, posinf=np.nan, neginf=np.nan, nan=np.nan)

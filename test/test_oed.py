@@ -13,8 +13,8 @@ from src.utils import model_1d_batch, ax_default, linear_eig
 
 def test_linear_gaussian_model(estimator='nmc'):
     # Linear gaussian model example
-    N = 1000
-    M = 1000
+    N = 500
+    M = 50
     Nx = 50
     Nr = 20
     noise_var = 0.01
@@ -46,12 +46,15 @@ def test_linear_gaussian_model(estimator='nmc'):
         eig_estimate = eig_nmc(x_loc, theta_sampler, linear_gaussian_model, N=N, M=M, replicates=Nr,
                                noise_cov=noise_cov, reuse_samples=False, n_jobs=-1)
     elif estimator == 'mcla':
+        # Marginal
         # eig_estimate = eig_mcla_pm(x_loc, theta_sampler, eta_sampler, linear_gaussian_model, prior_mean, prior_cov,
         #                            N=N, M=M, Ne=10, noise_cov=noise_cov, n_jobs=-1, batch_size=-1, replicates=Nr)
+
+        # Joint (sample theta and eta together, with eta along last axis)
         theta_sampler = lambda shape: np.random.randn(*shape, 2)
         prior_mean = np.array([0, 0])
         prior_cov = np.eye(2)
-        eig_estimate = eig_mcla(x_loc, theta_sampler, linear_gaussian_model, prior_mean, prior_cov, N=N, Ne=15,
+        eig_estimate = eig_mcla(x_loc, theta_sampler, linear_gaussian_model, prior_mean, prior_cov, N=N, Ne=10,
                                 noise_cov=noise_cov, replicates=Nr, n_jobs=-1, batch_size=-1)
 
     # Compute percentiles over replicates
@@ -288,5 +291,5 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     # eig = test_array_current_model(dim=1)
     # test_custom_nonlinear()
-    # test_linear_gaussian_model(estimator='mcla')
-    test_1d_nonlinear_model()
+    # test_1d_nonlinear_model()
+    test_linear_gaussian_model(estimator='mcla')
