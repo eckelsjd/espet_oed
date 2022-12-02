@@ -1,20 +1,14 @@
-name: espet_39
+name: espet
 channels:
   - defaults
 dependencies:
-  - jupyter
   - matplotlib
-  - notebook
   - numpy=1.22.3
   - cupy=8.3.0
-  - onnx
   - pip
   - python=3.9.12
   - scipy=1.7.3
   - pip:
-    - onnxruntime
-    - pandas
-    - salib
     - joblib
     - psutil
 prefix: C:\Users\eckel\anaconda3\envs\espet_39

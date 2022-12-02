@@ -5,6 +5,10 @@ from joblib import Parallel, delayed
 from threading import Thread
 import tempfile
 import os
+import time
+import logging
+import sys
+sys.path.extend('..')
 
 from src.utils import batch_normal_sample, batch_normal_pdf, fix_input_shape, memory, log_memory_usage
 
@@ -59,7 +63,7 @@ def eig_nmc(x_loc, theta_sampler, model, N=100, M=100, noise_cov=1.0, reuse_samp
             evidence[idx, :, :] = np.mean(batch_normal_pdf(y_curr, g_theta_j, noise_cov), axis=0)
 
         if ((idx + 1) % 100) == 0 and n_jobs == 1:
-            print(f'Samples processed: {idx + 1} out of {N}')
+            logging.info(f'Samples processed: {idx + 1} out of {N}')
 
     # Compute evidence p(y|d)
     if ppool is None:
@@ -87,7 +91,7 @@ def eig_nmc(x_loc, theta_sampler, model, N=100, M=100, noise_cov=1.0, reuse_samp
 
 
 # Nested monte carlo expected information gain estimator (pseudomarginal)
-# @memory(percentage=1.1)
+# @memory(percentage=0.95)
 def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, noise_cov=np.asarray(1.0),
                reuse_samples=False, n_jobs=1, batch_size=-1, replicates=1, ppool=None):
     # Get problem dimension
@@ -125,8 +129,8 @@ def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, 
     evidence = np.memmap(evidence_fd.name, dtype='float32', mode='r+', shape=(N, Nr, Nx))
 
     # Start memory logging
-    # daemon = Thread(target=log_memory_usage, args=(10,), daemon=True, name="Memory logger")
-    # daemon.start()
+    daemon = Thread(target=log_memory_usage, args=(30,), daemon=True, name="Memory logger")
+    daemon.start()
 
     # Sample parameters
     theta_i[:] = theta_sampler((N, Nr, Nx)).astype(np.float32)      # (N, Nr, Nx, theta_dim)
@@ -148,6 +152,7 @@ def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, 
 
     # Parallel loop
     def parallel_func(idx, theta_i, eta_i, y_i, g_theta_i, likelihood, evidence):
+        t1 = time.time()
         for curr_batch in range(num_batches):
             # Index the current batch
             start_idx = curr_batch * batch_size
@@ -174,6 +179,8 @@ def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, 
                 eta_k = eta_sampler((M2, Nr, batch_size)).astype(np.float32)            # (M2, Nr, bs, eta_dim)
                 g_theta_k = model(x_loc[b_slice, :], theta_curr, eta_k)                 # (M2, Nr, bs, y_dim)
                 likelihood[idx, :, b_slice] = np.mean(batch_normal_pdf(y_curr, g_theta_k, noise_cov), axis=0)
+
+        logging.info(f'Parallel idx {idx}: {time.time()-t1:.02} s')
 
     # Compute evidence p(y|d) and likelihood p(y|theta, d)
     if ppool is None:

@@ -2,9 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 from pathlib import Path
-
-from src.utils import linear_eig, ax_default, get_cycle, fix_input_shape
-from src.models import linear_gaussian_model, custom_nonlinear
+from joblib import Parallel
+import logging
+import time
+import sys
+sys.path.extend('..')
+from src.utils import linear_eig, ax_default, get_cycle, fix_input_shape, electrospray_samplers
+from src.models import linear_gaussian_model, custom_nonlinear, electrospray_current_model_cpu
 from src.nmc import eig_nmc_pm
 from src.lg import eig_lg
 
@@ -44,7 +48,7 @@ def test_lg(model='nonlinear'):
 def test_nmc(model='linear'):
     """Test nmc estimators on the specified model"""
     # Testing parameters
-    N_MC = 100                                  # number of MC replicates
+    N_MC = 50                                   # number of MC replicates
     N_to_M = np.array([0.01, 0.1, 1, 10, 100])  # N:M sample ratios
     N_est = N_to_M.shape[0]                     # number of estimators to compare
     N_cost = 6                                  # number of total costs (i.e. number of model evaluations)
@@ -87,7 +91,42 @@ def test_nmc(model='linear'):
         eig_truth = np.nanmean(eig_estimate, axis=0).reshape((1, Nx))
 
     elif model == 'electrospray':
-        raise NotImplementedError('Working on this')
+        Nx = 50
+        d = np.linspace(800, 1845, Nx)
+        theta_sampler, eta_sampler = electrospray_samplers()
+        model_func = electrospray_current_model_cpu
+        N = 256  # 2000
+        M = 10  # 5000
+        Nr = 10
+        bs = 5
+        exp_data = np.loadtxt('../data/training_data.txt', dtype=np.float32, delimiter='\t')
+        gamma = np.mean(exp_data[2, :])
+        logging.info('Starting main electrospray ground truth')
+        t1 = time.time()
+        eig_estimate = np.zeros((Nr, Nx))
+        with Parallel(n_jobs=-1, verbose=9) as ppool:
+            for i in range(Nr):
+                eig = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M, noise_cov=gamma,
+                                 reuse_samples=False, n_jobs=-1, batch_size=bs, replicates=1, ppool=ppool)
+                eig_estimate[i, :] = np.squeeze(eig, axis=0)
+        t2 = time.time()
+        logging.info(f'Total time for N={N} M={M} Nr={Nr} bs={bs}: {t2-t1:.02} s')
+        eig_truth = np.nanmean(eig_estimate, axis=0).reshape((1, Nx))
+        np.savez(Path('../results') / f'nmc_{model}_eig_truth.npz', d=d, eig_truth=eig_estimate)
+        eig_lb_pm = np.nanpercentile(eig_estimate, 5, axis=0)
+        eig_med_pm = np.nanpercentile(eig_estimate, 50, axis=0)
+        eig_ub_pm = np.nanpercentile(eig_estimate, 95, axis=0)
+
+        fig, ax = plt.subplots()
+        ax.plot(d, eig_med_pm, '-r', label=r'Marginal p($\theta$)')
+        ax.fill_between(d, eig_lb_pm, eig_ub_pm, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
+        ax.set_ylim(bottom=-0.01)
+        ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain')
+        fig.set_size_inches(4.8, 3.6)
+        fig.tight_layout()
+        fig.savefig(str(Path('../results/figs') / f'nmc_{model}_eig_truth.png'), dpi=300, format='png')
+        return
+
     else:
         raise NotImplementedError('Not working with whatever model you specified')
 
@@ -111,8 +150,14 @@ def test_nmc(model='linear'):
             real_cost[i, j] = 2*N*M
 
             # Run NMC estimator
-            eig_estimate = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M,
-                                      noise_cov=gamma, reuse_samples=False, n_jobs=-1, replicates=N_MC)  # (N_MC, Nx)
+            eig_estimate = np.zeros((N_MC, Nx))
+            with Parallel(n_jobs=-1, verbose=9) as ppool:
+                for i in range(N_MC):
+                    eig = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M, noise_cov=gamma,
+                                     reuse_samples=False, n_jobs=-1, batch_size=5, replicates=1, ppool=ppool)
+                    eig_estimate[i, :] = np.squeeze(eig, axis=0)
+            # eig_estimate = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M,
+            #                           noise_cov=gamma, reuse_samples=False, n_jobs=-1, replicates=N_MC)  # (N_MC, Nx)
             # Filter arithmetic underflow
             eig_store[i, j, :, :] = np.nan_to_num(eig_estimate, posinf=np.nan, neginf=np.nan)
             mse_store[i, j, :] = np.nanmean((eig_store[i, j, :, :] - eig_truth) ** 2, axis=-1)  # (N_MC,)
@@ -240,6 +285,7 @@ def plot_nmc(model='linear', estimator='nmc'):
 
 
 if __name__ == '__main__':
-    # test_nmc(model='nonlinear')
+    logging.basicConfig(level=logging.INFO)
+    test_nmc(model='electrospray')
     # plot_nmc(model='nonlinear')
-    test_lg(model='nonlinear')
+    # test_lg(model='nonlinear')
