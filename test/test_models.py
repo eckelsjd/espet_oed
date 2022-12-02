@@ -40,14 +40,14 @@ def test_custom_nonlinear():
 
     fig, ax = plt.subplots()
     c = ax.contourf(dg, tg, yg, 60, cmap='jet')
-    plt.colorbar(c, label='Model output $y$')
+    plt.colorbar(c, label=r'Forward model $G(\theta, \phi, d)$')
     ax.tick_params(axis='x', direction='in')
     ax.tick_params(axis='y', direction='in')
     ax.set_xlabel(r'Operating condition $d$')
     ax.set_ylabel(r'Model parameter $\theta$')
     fig.set_size_inches(4.8, 3.6)
     plt.tight_layout()
-    fig.savefig(str(Path('../results/figs') / 'nonlinear_model_contour.png'), dpi=100, format='png')
+    fig.savefig(str(Path('../results/figs') / 'nonlinear_model_contour.png'), dpi=300, format='png')
     plt.show()
 
 

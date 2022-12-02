@@ -5,32 +5,7 @@ import time
 from src.utils import fix_input_shape, linear_eig, approx_jacobian
 from src.models import nonlinear_model
 from src.nmc import eig_nmc
-
-
-def linearize_model(model, d, theta_L, eta):
-    """Return A,c to linearize the model about theta_L
-    Parameters
-    ----------
-    model: expects to be called as model(d, theta, eta), returns (*, Nx, y_dim)
-    d: (Nx, x_dim) model input locations
-    theta_L: (*, theta_dim) model parameter points to linearize model about
-    eta: (*, Nx, eta_dim) nuisance parameters needed to run the model
-
-    Returns
-    -------
-    A: (*, Nx, y_dim, theta_dim) Jacobian matrices at (*, Nx) locations
-    c: (*, Nx, y_dim) linear offsets at (*, Nx) locations
-    """
-    # Fix input shapes
-    theta_L = np.atleast_1d(theta_L)
-    if len(theta_L.shape) == 1:
-        theta = np.expand_dims(theta_L, axis=0)
-    d = fix_input_shape(d)                          # (Nx, x_dim)
-    A = approx_jacobian(model, d, theta_L, eta)     # (*, Nx, y_dim, theta_dim)
-    f_L = model(d, theta_L, eta)                    # (*, Nx, y_dim)
-    delta = A @ np.expand_dims(theta_L, axis=-1)    # (*, Nx, y_dim, 1)
-    c = f_L - np.squeeze(delta, axis=-1)            # (*, Nx, y_dim)
-    return A, c
+from src.lg import linearize_model
 
 
 def test_nonlinear():

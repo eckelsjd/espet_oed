@@ -3,9 +3,42 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 from pathlib import Path
 
-from src.utils import linear_eig, ax_default, get_cycle
+from src.utils import linear_eig, ax_default, get_cycle, fix_input_shape
 from src.models import linear_gaussian_model, custom_nonlinear
 from src.nmc import eig_nmc_pm
+from src.lg import eig_lg
+
+
+def test_lg(model='nonlinear'):
+    Nx = 50
+
+    if model == 'nonlinear':
+        theta_mean = np.array([0.5])
+        eta = np.array([0.5])
+        theta_var = 0.25 ** 2
+        noise_cov = 0.01
+        x = np.linspace(0, 1, Nx)
+        model_func = custom_nonlinear
+
+        # Compute eig
+        eig_estimate = eig_lg(x, model_func, theta_mean, theta_var, eta, noise_cov)
+
+    # Compare to ground truth
+    data = np.load(str(Path('../results') / f'nmc_{model}.npz'))
+    eig_truth = data['eig_truth']  # (1, Nx)
+    mse = np.mean((eig_estimate - eig_truth)**2)
+    print(f'MSE of LG estimate: {mse}')
+
+    fig, ax = plt.subplots()
+    ax.plot(x, np.squeeze(eig_truth), '-k', label=r'Ground truth')
+    ax.plot(x, np.squeeze(eig_estimate), '--r', label=r'Linear Gaussian')
+    ax.set_xlim(left=0, right=1)
+    ax.set_ylim(bottom=-0.01)
+    ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
+    fig.set_size_inches(4.8, 3.6)
+    plt.tight_layout()
+    fig.savefig(str(Path('../results/figs') / 'nonlinear_lg_eig.png'), dpi=300, format='png')
+    plt.show()
 
 
 def test_nmc(model='linear'):
@@ -89,9 +122,9 @@ def test_nmc(model='linear'):
              cost=real_cost, N2M=N_to_M)
 
 
-def plot_nmc(model='linear'):
+def plot_nmc(model='linear', estimator='nmc'):
     # Load data from npz file
-    data = np.load(str(Path('../results')/f'nmc_{model}.npz'))
+    data = np.load(str(Path('../results')/f'{estimator}_{model}.npz'))
 
     eig_store = data['eig']
     eig_truth = data['eig_truth']
@@ -110,7 +143,7 @@ def plot_nmc(model='linear'):
     for i, nm_ratio in enumerate(N_to_M):
         # Loop over each cost
         for j in range(N_cost):
-            axs[i, j].plot(d, eig_med[i, j, :], '-r', label='NMC')
+            axs[i, j].plot(d, eig_med[i, j, :], '-r', label='Estimator')
             axs[i, j].fill_between(d, eig_lb[i, j, :], eig_ub[i, j, :], alpha=0.3, edgecolor=(0.5, 0.5, 0.5),
                                    facecolor='r')
             axs[i, j].plot(d, eig_truth[0, :], '-k', label='Exact')
@@ -140,41 +173,73 @@ def plot_nmc(model='linear'):
     fig.text(0.02, 0.5, r'Expected information gain', va='center', fontweight='bold', rotation='vertical')
     fig.set_size_inches(N_cost*2.5, N_est*2.5)
     fig.tight_layout(pad=3, w_pad=1, h_pad=1)
-    fig.savefig(str(Path('../results/figs') / f'{model}_N2M_cost_eig.png'), dpi=100, format='png')
+    fig.savefig(str(Path('../results/figs') / f'{estimator}_{model}_N2M_cost_eig.png'), dpi=100, format='png')
     plt.show()
 
     # Plot MSE log plot
-    mse_store = data['mse']  # (N_est, N_cost, N_MC)
-    # mse = np.nanmean((eig_store - eig_truth.reshape((1, 1, 1, Nx)))**2, axis=(-2, -1))  # (N_est, N_cost)
-    fig, ax = plt.subplots()
+    # mse_store = data['mse']  # (N_est, N_cost, N_MC)
+    # # mse = np.nanmean((eig_store - eig_truth.reshape((1, 1, 1, Nx)))**2, axis=(-2, -1))  # (N_est, N_cost)
+    # for i, nm_ratio in enumerate(N_to_M):
+    #     # Get N:M ratio label
+    #     label = f"{int(nm_ratio)}:1" if nm_ratio >= 1 else f"1:{int(1/nm_ratio)}"
+    #     mean_mse = np.mean(mse_store[i, :, :], axis=-1)    # (N_cost,)
+    #     var = np.var(mse_store[i, :, :], axis=-1, ddof=1)  # (N_cost,)
+    #     std_err = np.sqrt(var/N_MC)
+    #     ax.errorbar(cost[i, :], mean_mse, yerr=1.96*std_err, linestyle='-',
+    #                  markersize=0, linewidth=1.5, capsize=2, label=label)
+
+    # Plot Bias, variance, MSE
+    bias = np.nanmean(eig_store - eig_truth.reshape((1, 1, 1, Nx)), axis=-2)    # (N_est, N_cost, Nx)
+    var = np.nanvar(eig_store, axis=-2)                                         # (N_est, N_cost, Nx)
+    mse = bias ** 2 + var                                                       # (N_est, N_cost, Nx)
+    fig, axs = plt.subplots(1, 3, sharey='row')
     colors = get_cycle("tab10", N=6)
-    ax.set_prop_cycle(color=colors.by_key()['color'], marker=['o', 'D', '^', 's', '*', 'X'])
-    ax.plot(np.NaN, np.NaN, '-', color='none', label='N:M')
+    for i in range(3):
+        axs[i].set_prop_cycle(color=colors.by_key()['color'], marker=['o', 'D', '^', 's', '*', 'X'])
+        axs[i].set_xlabel(r'Number of model evaluations')
+        axs[i].grid()
+        axs[i].set_yscale('log')
+        axs[i].set_xscale('log')
+    axs[1].plot(np.NaN, np.NaN, '-', color='none', label='N:M')
     for i, nm_ratio in enumerate(N_to_M):
-        # Get N:M ratio label
-        label = f"{int(nm_ratio)}:1" if nm_ratio >= 1 else f"1:{int(1/nm_ratio)}"
-        mean_mse = np.mean(mse_store[i, :, :], axis=-1)    # (N_cost,)
-        var = np.var(mse_store[i, :, :], axis=-1, ddof=1)  # (N_cost,)
-        std_err = np.sqrt(var/N_MC)
-        plt.errorbar(cost[i, :], mean_mse, yerr=std_err, linestyle='-',
-                     markersize=4, linewidth=1.5, capsize=2, label=label)
-        # plt.plot(cost[i, :], mse[i, :], linestyle='-', markersize=4, linewidth=1.5, label=label)
-    ax.set_xlabel(r'Model evaluations ($C=2NM$)')
-    ax.set_ylabel(r'Estimator MSE')
-    ax.grid()
-    fig.set_size_inches(4.5, 3)
-    fig.subplots_adjust(right=0.8)
-    leg = ax.legend(loc='upper left', bbox_to_anchor=(1, 1.02), fancybox=True)
+        # Plot bias
+        bias_mean = np.nanmean(np.abs(bias), axis=-1)   # (N_est, N_cost)
+        nx_var = np.nanvar(np.abs(bias), axis=-1)       # (N_est, N_cost)
+        std_err = np.sqrt(nx_var / Nx)
+        axs[0].set_ylabel(r'Estimator bias')
+        axs[0].errorbar(cost[i, :], bias_mean[i, :], yerr=1.96 * std_err[i, :], linestyle='-',
+                        markersize=0, linewidth=1.3, capsize=2)
+        # axs[0].plot(cost[i, :], np.abs(bias_mean[i, :]), linestyle='-', markersize=1, linewidth=1.3)
+
+        # Plot variance
+        label = f"{int(nm_ratio)}:1" if nm_ratio >= 1 else f"1:{int(1 / nm_ratio)}"
+        var_mean = np.nanmean(var, axis=-1)     # (N_est, N_cost)
+        nx_var = np.nanvar(var, axis=-1)        # (N_est, N_cost)
+        std_err = np.sqrt(nx_var / Nx)
+        axs[1].set_ylabel(r'Estimator variance')
+        axs[1].errorbar(cost[i, :], var_mean[i, :], yerr=1.96 * std_err[i, :], linestyle='-',
+                        markersize=0, linewidth=1.3, capsize=2, label=label)
+        # Plot MSE
+        mse_mean = np.nanmean(mse, axis=-1)     # (N_est, N_cost)
+        nx_var = np.nanvar(mse, axis=-1)        # (N_est, N_cost)
+        std_err = np.sqrt(nx_var / Nx)
+        axs[2].set_ylabel(r'Estimator MSE')
+        axs[2].errorbar(cost[i, :], mse_mean[i, :], yerr=1.96 * std_err[i, :], linestyle='-',
+                        markersize=0, linewidth=1.3, capsize=2)
+
+    axs[0].set_ylim(bottom=3e-5)
+    fig.set_size_inches(9, 3.5)
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.86)
+    leg = fig.legend(loc='upper center', fancybox=True, ncol=N_est+1)
     frame = leg.get_frame()
     frame.set_edgecolor('k')
     frame.set_facecolor([1, 1, 1, 1])
-    ax.set_yscale('log')
-    ax.set_xscale('log')
-    fig.tight_layout()
-    fig.savefig(str(Path('../results/figs') / f'{model}_mse.png'), dpi=100, format='png')
+    fig.savefig(str(Path('../results/figs') / f'{estimator}_{model}_mse.png'), dpi=150, format='png')
     plt.show()
 
 
 if __name__ == '__main__':
     # test_nmc(model='nonlinear')
-    plot_nmc(model='linear')
+    # plot_nmc(model='nonlinear')
+    test_lg(model='nonlinear')

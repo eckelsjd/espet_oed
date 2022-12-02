@@ -8,7 +8,8 @@ from src.models import electrospray_current_model_cpu, nonlinear_model, linear_g
 from src.models import custom_nonlinear
 from src.nmc import eig_nmc_pm, eig_nmc
 from src.mcla import eig_mcla_pm, eig_mcla
-from src.utils import model_1d_batch, ax_default, linear_eig
+from src.lg import eig_lg
+from src.utils import model_1d_batch, ax_default, linear_eig, electrospray_samplers
 
 
 def test_linear_gaussian_model(estimator='nmc'):
@@ -46,33 +47,35 @@ def test_linear_gaussian_model(estimator='nmc'):
         eig_estimate = eig_nmc(x_loc, theta_sampler, linear_gaussian_model, N=N, M=M, replicates=Nr,
                                noise_cov=noise_cov, reuse_samples=False, n_jobs=-1)
     elif estimator == 'mcla':
+        pass
         # Marginal
         # eig_estimate = eig_mcla_pm(x_loc, theta_sampler, eta_sampler, linear_gaussian_model, prior_mean, prior_cov,
         #                            N=N, M=M, Ne=10, noise_cov=noise_cov, n_jobs=-1, batch_size=-1, replicates=Nr)
 
         # Joint (sample theta and eta together, with eta along last axis)
-        theta_sampler = lambda shape: np.random.randn(*shape, 2)
-        prior_mean = np.array([0, 0])
-        prior_cov = np.eye(2)
-        eig_estimate = eig_mcla(x_loc, theta_sampler, linear_gaussian_model, prior_mean, prior_cov, N=N, Ne=10,
-                                noise_cov=noise_cov, replicates=Nr, n_jobs=-1, batch_size=-1)
+        # theta_sampler = lambda shape: np.random.randn(*shape, 2)
+        # prior_mean = np.array([0, 0])
+        # prior_cov = np.eye(2)
+        # eig_estimate = eig_mcla(x_loc, theta_sampler, linear_gaussian_model, prior_mean, prior_cov, N=N, Ne=10,
+        #                         noise_cov=noise_cov, replicates=Nr, n_jobs=-1, batch_size=-1)
 
     # Compute percentiles over replicates
-    eig_lb = np.nanpercentile(eig_estimate, 5, axis=0)
-    eig_med = np.nanpercentile(eig_estimate, 50, axis=0)
-    eig_ub = np.nanpercentile(eig_estimate, 95, axis=0)
+    # eig_lb = np.nanpercentile(eig_estimate, 5, axis=0)
+    # eig_med = np.nanpercentile(eig_estimate, 50, axis=0)
+    # eig_ub = np.nanpercentile(eig_estimate, 95, axis=0)
 
     fig, ax = plt.subplots()
-    ax.plot(d, eig_truth_marg, '-k', label=r'Exact marginal')
-    ax.plot(d, eig_truth_joint, '--k', label=r'Exact joint')
-    ax.plot(d, eig_med, '-r', label=r'Estimator')
-    ax.fill_between(d, eig_lb, eig_ub, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
+    ax.plot(d, eig_truth_marg, '--k', label=r'Marginal $p(\theta)$')
+    ax.plot(d, eig_truth_joint, '-k', label=r'Joint $p(\theta, \phi)$')
+    # ax.plot(d, eig_med, '-r', label=r'Estimator')
+    # ax.fill_between(d, eig_lb, eig_ub, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
     ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
     ax.set_xlim(left=0, right=1)
     ax.set_ylim(bottom=-0.01)
     fig.set_size_inches(4.8, 3.6)
     plt.tight_layout()
     plt.show()
+    fig.savefig(str(Path('../results/figs') / f'linear-eig.png'), dpi=300, format='png')
 
 
 def test_1d_nonlinear_model():
@@ -142,59 +145,10 @@ def test_2d_nonlinear_model():
 
 
 def test_array_current_model(dim=1):
-    # Array current model
-    params = np.loadtxt('../data/Nr100_noPr_samples__2021_12_07T11_41_27.txt', dtype=np.float32, delimiter='\t',
-                        skiprows=1)
-    geoms = np.loadtxt('../data/mr_geoms.dat', dtype=np.float32, delimiter='\t')             # (Nr*Ne, geo_dim)
-    emax_sim = np.loadtxt('../data/mr_geoms_tipE.dat', dtype=np.float32, delimiter='\t')     # (Nr*Ne, )
+    # Get samplers
+    theta_sampler, eta_sampler = electrospray_samplers()
 
-    def theta_sampler(shape):
-        # Use preset samples from posterior
-        ind = np.random.randint(0, params.shape[0], shape)
-        samples = params[ind, :]  # (*, 3)
-        return samples
-
-    def beam_sampler(shape):
-        qm_ratio = np.random.randn(*shape, 1) * 1.003e4 + 5.5e5
-        return qm_ratio  # (*, 1)
-
-    def prop_sampler(shape):
-        k = np.random.rand(*shape, 1) * (1.39 - 1.147) + 1.147
-        gamma = np.random.rand(*shape, 1) * (5.045e-2 - 5.003e-2) + 5.003e-2
-        rho = np.random.rand(*shape, 1) * (1.284e3 - 1.28e3) + 1.28e3
-        mu = np.random.rand(*shape, 1) * (3.416e-2 - 2.612e-2) + 2.612e-2
-        props = np.concatenate((k, gamma, rho, mu), axis=-1)
-        return props  # (*, 4)
-
-    def subs_sampler(shape):
-        # rpr = np.random.rand(1, Nr) * (8e-6 - 5e-6) + 5e-6
-        rpr = np.ones((*shape, 1)) * 8e-6
-        kappa = np.random.randn(*shape, 1) * 6.04e-15 + 1.51e-13
-        subs = np.concatenate((rpr, kappa), axis=-1)
-        return subs  # (*, 2)
-
-    def eta_sampler(shape):
-        # Load emitter data
-        Ne = 300
-        geo_dim = geoms.shape[1]
-        sim_data = np.concatenate((geoms, emax_sim[:, np.newaxis]), axis=1)
-        # g = geoms.reshape((Nr, 1, Ne * geo_dim))  # (Nr, 1, Ne*geo_dim)
-
-        # Randomly sample emitter geometries that we have data for
-        ind = np.random.randint(0, geoms.shape[0], (*shape, Ne))  # (*, Ne)
-        geo_data = sim_data[ind, :]  # (*, Ne, geo_dim+1)
-        geo_data = np.reshape(geo_data, (*shape, Ne * (geo_dim + 1)))
-
-        # Sample other parameters
-        subs = subs_sampler(shape)   # (*, 2)
-        props = prop_sampler(shape)  # (*, 4)
-        beams = beam_sampler(shape)  # (*, 1)
-
-        # Combine
-        eta = np.concatenate((subs, props, beams, geo_data), axis=-1)  # (*, 7 + Ne*(geo_dim+1))
-
-        return eta.astype(np.float32)
-
+    # Experimental data
     exp_data = np.loadtxt('../data/training_data.txt', dtype=np.float32, delimiter='\t')
     var = 2 * np.max(exp_data[2, :])
 
@@ -250,9 +204,9 @@ def test_custom_nonlinear():
     d = np.linspace(0, 1, Nx)
     std = 0.25
     mean = 0.5
-    N = 223
-    M = 2230
-    Nr = 50
+    N = 500
+    M = 500
+    Nr = 100
     gamma = 0.01
     model_func = custom_nonlinear
 
@@ -274,16 +228,34 @@ def test_custom_nonlinear():
     eig_ub_joint = np.nanpercentile(eig_estimate_joint, 95, axis=0)
 
     fig, ax = plt.subplots()
-    ax.plot(d, eig_med_joint, '-k', label=r'Joint')
+    ax.plot(d, eig_med_joint, '-k', label=r'Joint p($\theta$, $\phi$)')
     ax.fill_between(d, eig_lb_joint, eig_ub_joint, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='gray')
-    ax.plot(d, eig_med_pm, '-r', label=r'Marginal')
+    ax.plot(d, eig_med_pm, '-r', label=r'Marginal p($\theta$)')
     ax.fill_between(d, eig_lb_pm, eig_ub_pm, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
-    ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
     ax.set_xlim(left=0, right=1)
-    ax.set_ylim(bottom=-0.01)
+    ax.set_ylim(bottom=-0.01, top=1.2)
+    ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
     fig.set_size_inches(4.8, 3.6)
     plt.tight_layout()
-    fig.savefig(str(Path('../results/figs')/'nonlinear_joint_marg_eig.png'), dpi=100, format='png')
+    fig.savefig(str(Path('../results/figs')/'nonlinear_joint_marg_eig.png'), dpi=300, format='png')
+    plt.show()
+
+
+def test_lg():
+    Nx = 50
+    theta_mean = np.array([0.5])
+    eta = np.array([0.5])
+    theta_var = 0.25**2
+    noise_cov = 0.01
+    x = np.linspace(0, 1, Nx)
+
+    # Compute eig
+    eig_estimate = eig_lg(x, custom_nonlinear, theta_mean, theta_var, eta, noise_cov)
+
+    plt.figure()
+    plt.plot(x, eig_estimate, '--r')
+    plt.xlabel('Operating condition $d$')
+    plt.ylabel('Expected information gain')
     plt.show()
 
 
@@ -292,4 +264,5 @@ if __name__ == '__main__':
     # eig = test_array_current_model(dim=1)
     # test_custom_nonlinear()
     # test_1d_nonlinear_model()
-    test_linear_gaussian_model(estimator='mcla')
+    # test_linear_gaussian_model(estimator='mcla')
+    test_lg()

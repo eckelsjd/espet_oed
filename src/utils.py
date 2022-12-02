@@ -52,6 +52,62 @@ def memory(percentage=1):
     return decorator
 
 
+def electrospray_samplers(Ne=576):
+    # Array current model
+    params = np.loadtxt('../data/Nr100_noPr_samples__2021_12_07T11_41_27.txt', dtype=np.float32, delimiter='\t',
+                        skiprows=1)
+    geoms = np.loadtxt('../data/mr_geoms.dat', dtype=np.float32, delimiter='\t')             # (Nr*Ne, geo_dim)
+    emax_sim = np.loadtxt('../data/mr_geoms_tipE.dat', dtype=np.float32, delimiter='\t')     # (Nr*Ne, )
+
+    def theta_sampler(shape):
+        # Use preset samples from posterior
+        ind = np.random.randint(0, params.shape[0], shape)
+        samples = params[ind, :]  # (*, 3)
+        return samples
+
+    def beam_sampler(shape):
+        qm_ratio = np.random.randn(*shape, 1) * 1.003e4 + 5.5e5
+        return qm_ratio  # (*, 1)
+
+    def prop_sampler(shape):
+        k = np.random.rand(*shape, 1) * (1.39 - 1.147) + 1.147
+        gamma = np.random.rand(*shape, 1) * (5.045e-2 - 5.003e-2) + 5.003e-2
+        rho = np.random.rand(*shape, 1) * (1.284e3 - 1.28e3) + 1.28e3
+        mu = np.random.rand(*shape, 1) * (3.416e-2 - 2.612e-2) + 2.612e-2
+        props = np.concatenate((k, gamma, rho, mu), axis=-1)
+        return props  # (*, 4)
+
+    def subs_sampler(shape):
+        # rpr = np.random.rand(1, Nr) * (8e-6 - 5e-6) + 5e-6
+        rpr = np.ones((*shape, 1)) * 8e-6
+        kappa = np.random.randn(*shape, 1) * 6.04e-15 + 1.51e-13
+        subs = np.concatenate((rpr, kappa), axis=-1)
+        return subs  # (*, 2)
+
+    def eta_sampler(shape):
+        # Load emitter data
+        geo_dim = geoms.shape[1]
+        sim_data = np.concatenate((geoms, emax_sim[:, np.newaxis]), axis=1)
+        # g = geoms.reshape((Nr, 1, Ne * geo_dim))  # (Nr, 1, Ne*geo_dim)
+
+        # Randomly sample emitter geometries that we have data for
+        ind = np.random.randint(0, geoms.shape[0], (*shape, Ne))  # (*, Ne)
+        geo_data = sim_data[ind, :]  # (*, Ne, geo_dim+1)
+        geo_data = np.reshape(geo_data, (*shape, Ne * (geo_dim + 1)))
+
+        # Sample other parameters
+        subs = subs_sampler(shape)   # (*, 2)
+        props = prop_sampler(shape)  # (*, 4)
+        beams = beam_sampler(shape)  # (*, 1)
+
+        # Combine
+        eta = np.concatenate((subs, props, beams, geo_data), axis=-1)  # (*, 7 + Ne*(geo_dim+1))
+
+        return eta.astype(np.float32)
+
+    return theta_sampler, eta_sampler
+
+
 def approx_jacobian(func, d, theta, eta, pert=0.01):
     """Approximate Jacobian of the function at a specified theta location
     Parameters
@@ -108,11 +164,11 @@ def approx_hessian(func, d, theta, eta=None, pert=0.01):
     -------
     H: (*, Nx, theta_dim, theta_dim) The approximate Hessian (theta_dim, theta_dim) at locations (*, Nx)
     """
-    f = func(d, theta, eta)         # (*, Nx, y_dim)
-    shape = theta.shape[:-1]        # (*)
-    theta_dim = theta.shape[-1]     # Number of parameters
-    Nx, x_dim = d.shape             # Dimension of input
-    y_dim = f.shape[-1]             # Dimension of output
+    f = np.atleast_1d(func(d, theta, eta))  # (*, Nx, y_dim)
+    shape = theta.shape[:-1]                # (*)
+    theta_dim = theta.shape[-1]             # Number of parameters
+    Nx, x_dim = d.shape                     # Dimension of input
+    y_dim = f.shape[-1]                     # Dimension of output
     dtheta = pert * theta
 
     # Return a Hessian (theta_dim, theta_dim) at locations (*, Nx)
@@ -121,6 +177,8 @@ def approx_hessian(func, d, theta, eta=None, pert=0.01):
         H = np.zeros((Nx, theta_dim, theta_dim))
     elif len(shape) > 1:
         H = np.zeros((*(shape[:-1]), Nx, theta_dim, theta_dim))
+    else:
+        H = np.zeros((theta_dim, theta_dim))
     ind = tuple([slice(None)] * len(shape))  # (*)
 
     for i in range(theta_dim):
@@ -350,7 +408,7 @@ def batch_normal_pdf(x, mu, cov, logpdf=False):
     ----------
     x: (*, d) location to compute the multivariate normal pdf
     mu: (*, d) mean values to use at each x location
-    cov: (d, d) covariance matrix, assumed same at all locations
+    cov: (*, d, d) covariance matrix
     Returns
     -------
     pdf: (*) the multivariate normal pdf at each x location
@@ -359,17 +417,17 @@ def batch_normal_pdf(x, mu, cov, logpdf=False):
     x = np.atleast_1d(x)
     mu = np.atleast_1d(mu)
     cov = np.atleast_1d(cov)
-    dim = cov.shape[0]
+    dim = cov.shape[-1]
 
     # 1-D case
-    if dim == 1:
+    if len(cov.shape) == 1:
         cov = cov[:, np.newaxis]    # (1, 1)
     if len(x.shape) == 1:
         x = x[np.newaxis, :]
     if len(mu.shape) == 1:
         mu = mu[np.newaxis, :]
 
-    assert cov.shape[0] == cov.shape[1] == dim
+    assert cov.shape[-1] == cov.shape[-2] == dim
     assert x.shape[-1] == mu.shape[-1] == dim
 
     # Normalizing constant (scalar)
