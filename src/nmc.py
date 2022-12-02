@@ -8,7 +8,7 @@ import os
 import time
 import logging
 import sys
-sys.path.extend('..')
+sys.path.append('..')
 
 from src.utils import batch_normal_sample, batch_normal_pdf, fix_input_shape, memory, log_memory_usage
 
@@ -129,8 +129,8 @@ def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, 
     evidence = np.memmap(evidence_fd.name, dtype='float32', mode='r+', shape=(N, Nr, Nx))
 
     # Start memory logging
-    daemon = Thread(target=log_memory_usage, args=(30,), daemon=True, name="Memory logger")
-    daemon.start()
+    # daemon = Thread(target=log_memory_usage, args=(30,), daemon=True, name="Memory logger")
+    # daemon.start()
 
     # Sample parameters
     theta_i[:] = theta_sampler((N, Nr, Nx)).astype(np.float32)      # (N, Nr, Nx, theta_dim)
@@ -180,7 +180,7 @@ def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, 
                 g_theta_k = model(x_loc[b_slice, :], theta_curr, eta_k)                 # (M2, Nr, bs, y_dim)
                 likelihood[idx, :, b_slice] = np.mean(batch_normal_pdf(y_curr, g_theta_k, noise_cov), axis=0)
 
-        logging.info(f'Parallel idx {idx}: {time.time()-t1:.02} s')
+        print(f'Parallel idx {idx}: {time.time()-t1:.02} s')
 
     # Compute evidence p(y|d) and likelihood p(y|theta, d)
     if ppool is None:

@@ -1,5 +1,5 @@
 import numpy as np
-# import cupy as cp
+import cupy as cp
 import sys
 sys.path.extend('..')
 
@@ -180,9 +180,8 @@ def custom_nonlinear(x, theta, eta=None, env_var=0.1**2, wavelength=0.5, wave_am
     return y  # (*, Nx, y_dim)
 
 
-def electrospray_current_model_gpu(x, theta, eta):
-    """ MEMORY-HEAVY O(1) runtime, O(5GB/process) memory
-    Predicts total array current for an electrospray thruster
+def electrospray_current_model(x, theta, eta, gpu=False):
+    """ Predicts total array current for an electrospray thruster
     Parameters
     ----------
     x: (Nx, x_dim) voltage operating conditions [V]
@@ -193,149 +192,19 @@ def electrospray_current_model_gpu(x, theta, eta):
     -------
     current: (*, Nx, y_dim) model output [A]
     """
-    # Transfer to GPU memory
-    voltage = cp.asarray(x)
-    theta = cp.asarray(theta)
-    eta = cp.asarray(eta)
-
-    # Constants
-    eta_dim = eta.shape[-1]
-    theta_dim = theta.shape[-1]
-    VACUUM_PERMITTIVITY = 8.8542e-12
-    Nx, x_dim = x.shape
-    Ne = int(np.floor((eta_dim - 7) / 7))   # number of emitters
-
-    # Extract model params
-    ind = tuple([slice(None)] * (len(theta.shape) - 1))
-    ion_emis_offset = theta[(*ind, 0)]                          # (*, Nx)
-    ion_emis_slope = theta[(*ind, 1)]                           # (*, Nx)
-    pool_radius = theta[(*ind, 2)]                              # (*, Nx)
-
-    # Extract substrate properties
-    res_pore_radius = eta[(*ind, 0)]                            # (*, Nx)
-    permeability = eta[(*ind, 1)]
-
-    # Extract material properties
-    conductivity = eta[(*ind, 2)]                               # (*, Nx)
-    surface_tension = eta[(*ind, 3)]
-    density = eta[(*ind, 4)]
-    viscosity = eta[(*ind, 5)]
-
-    # Extract beam properties
-    charge_to_mass = eta[(*ind, 6)]                             # (*, Nx)
-
-    # Extract emitter geometries
-    geo_data = eta[(*ind, slice(7, None))].reshape((*eta.shape[:-1], Ne, 7))
-    geoms = geo_data[(*ind, slice(None), slice(6))]             # (*, Nx, Ne, 6)
-    emax_sim = geo_data[(*ind, slice(None), 6)]                 # (*, Nx, Ne)
-    curvature_radius = geoms[(*ind, slice(None), 0)]            # (*, Nx, Ne)
-    # gap_distance = geoms[(*ind, slice(None), 1)]
-    # aperture_radius = geoms[(*ind, slice(None), 2)]
-    half_angle = geoms[(*ind, slice(None), 3)]
-    emitter_height = geoms[(*ind, slice(None), 4)]
-    loc_pore_radius = geoms[(*ind, slice(None), 5)]
-
-    del geoms
-    del geo_data
-
-    # Define some useful slice indices
-    Nx_idx = (*ind, cp.newaxis)                                 # (*, Nx, 1)
-    Nxx_idx = (*ind, cp.newaxis, cp.newaxis)                    # (*, Nx, 1, 1)
-    Ne_idx = (*ind, slice(None), cp.newaxis)                    # (*, Nx, Ne, 1)
-
-    # Calculate some quantities common to all emitters and emission sites
-    hydraulic_resistivity = viscosity / (2 * cp.pi * permeability)          # (*, Nx)
-    res_pressure = -2 * surface_tension / res_pore_radius                   # (*, Nx)
-
-    # Compute electric field
-    voltage = voltage.reshape((1,) * len(emax_sim.shape[:-2]) + (Nx, 1))    # (...1, Nx, 1)
-    applied_field = emax_sim * voltage                                      # (*, Nx, Ne)
-
-    # Compute the number of sites for each emitter                          # (*, Nx, Ne)
-    applied_electric_pressure = 1 / 2 * VACUUM_PERMITTIVITY * applied_field ** 2
-    min_cap_pressure = 2 * surface_tension[Nx_idx] / (loc_pore_radius + pool_radius[Nx_idx])
-    max_cap_pressure = 2 * surface_tension[Nx_idx] / loc_pore_radius
-
-    no_sites_mask = applied_electric_pressure < min_cap_pressure - res_pressure[Nx_idx]
-    all_sites_mask = applied_electric_pressure > max_cap_pressure - res_pressure[Nx_idx]
-
-    mask_shape = all_sites_mask.shape                                       # (*, Nx, Ne)
-    A_emission = 2 * cp.pi * curvature_radius ** 2 * (1 - cp.sin(half_angle))
-    A_Taylor = cp.pi * ((pool_radius[Nx_idx] + loc_pore_radius) / 2) ** 2
-    max_sites = A_emission / A_Taylor
-
-    num_sites = cp.where(all_sites_mask, cp.floor(max_sites), 0)            # (*, Nx, Ne)
-    neither_mask = ~(no_sites_mask | all_sites_mask)
-
-    # Ignore errors from bad sites that we don't need
-    with np.errstate(divide='ignore', invalid='ignore'):
-        min_site_radius = 2 * surface_tension[Nx_idx] / (1 / 2 * VACUUM_PERMITTIVITY * applied_field ** 2 +
-                                                         res_pressure[Nx_idx])
-        arr = cp.floor(1 + (max_sites - 1) * (1 - (min_site_radius - loc_pore_radius) / pool_radius[Nx_idx]) ** 4)
-        num_sites = num_sites + cp.where(neither_mask, arr, 0)
-
-        Ns_max = int(cp.max(num_sites))
-        site_nums = cp.arange(Ns_max).reshape((1,)*len(mask_shape) + (Ns_max, )) + 1    # (...1     , Ns_max)
-        active_mask = site_nums <= num_sites[Ne_idx]                                    # (*, Nx, Ne, Ns_max)
-
-        # Compute site radius
-        site_radius = pool_radius[Nxx_idx] * (1 - ((site_nums-1) / (max_sites[Ne_idx]-1)) ** 0.25) + \
-                      loc_pore_radius[Ne_idx]
-
-        # Compute characteristic pressure
-        char_pressure = 2 * surface_tension[Nxx_idx] / site_radius
-
-        # Compute characteristic electric field and onset field
-        char_elec_field = cp.sqrt(2 * char_pressure / VACUUM_PERMITTIVITY)
-        onset_field = cp.sqrt((2 * (char_pressure - res_pressure[Nxx_idx])) / VACUUM_PERMITTIVITY)
-        dimless_applied_field = applied_field[Ne_idx] / char_elec_field
-        dimless_onset_field = onset_field / char_elec_field
-
-        # Compute hydraulic impedance
-        hydraulic_impedance = num_sites * hydraulic_resistivity[Nx_idx] / (1 - cp.cos(half_angle)) * \
-                              (cp.tan(half_angle) / curvature_radius - cp.cos(half_angle) / emitter_height)
-        dimless_res_pressure = res_pressure[Nxx_idx] / char_pressure
-        dimless_hydraulic_impedance = conductivity[Nxx_idx] * char_elec_field * site_radius ** 2 * \
-                                      hydraulic_impedance[Ne_idx] / (char_pressure * density[Nxx_idx] *
-                                                                     charge_to_mass[Nxx_idx])
-
-        # Compute current emitted by each active site
-        dimless_current = (ion_emis_offset[Nxx_idx]+ion_emis_slope[Nxx_idx]*(dimless_applied_field-dimless_onset_field)
-                           + dimless_res_pressure) / dimless_hydraulic_impedance
-
-        arr = dimless_current * conductivity[Nxx_idx] * char_elec_field * site_radius ** 2
-
-    site_current = cp.where(active_mask, arr, 0)
-    site_current[site_current < 0] = 0
-
-    # Sum current over all sites and emitters
-    current = cp.sum(site_current, axis=(-1, -2))[Nx_idx]  # (*, Nx, 1)
-
-    return cp.asnumpy(current)
-
-
-def electrospray_current_model_cpu(x, theta, eta):
-    """ CPU-HEAVY O(N) runtime, O(5MB/process) memory
-    Predicts total array current for an electrospray thruster
-    Parameters
-    ----------
-    x: (Nx, x_dim) voltage operating conditions [V]
-    theta: (*, Nx, theta_dim) model parameters
-    eta: (*, Nx, eta_dim) nuisance parameters
-
-    Returns
-    -------
-    current: (*, Nx, y_dim) model output [A]
-    """
+    lp = cp if gpu else np
     # Fix shapes
-    x = fix_input_shape(x)
+    x = lp.atleast_1d(x).astype(lp.float32)
+    if len(x.shape) == 1:
+        # Assume one x dimension
+        x = x[:, lp.newaxis]
     Nx, x_dim = x.shape
-    theta = np.atleast_1d(theta)
+    theta = lp.atleast_1d(theta).astype(lp.float32)
     if len(theta.shape) == 1:
-        theta = np.expand_dims(theta, axis=0)
-    eta = np.atleast_1d(eta)
+        theta = lp.expand_dims(theta, axis=0)
+    eta = lp.atleast_1d(eta).astype(lp.float32)
     if len(eta.shape) == 1:
-        eta = np.expand_dims(eta, axis=0)
+        eta = lp.expand_dims(eta, axis=0)
     theta_shape = theta.shape[:-2]
     theta_dim = theta.shape[-1]
     eta_shape = eta.shape[:-2]
@@ -345,26 +214,26 @@ def electrospray_current_model_cpu(x, theta, eta):
 
     # Problem setup
     VACUUM_PERMITTIVITY = 8.8542e-12
-    Ne = int(np.floor((eta_dim - 7) / 7))    # number of emitters
+    Ne = int(lp.floor((eta_dim - 7) / 7))    # number of emitters
     assert theta_dim == 3
 
     # Extract model parameters
-    ion_emis_offset = theta[..., 0, np.newaxis]  # (*, 1)
-    ion_emis_slope = theta[..., 1, np.newaxis]
-    pool_radius = theta[..., 2, np.newaxis]
+    ion_emis_offset = theta[..., 0, lp.newaxis]  # (*, 1)
+    ion_emis_slope = theta[..., 1, lp.newaxis]
+    pool_radius = theta[..., 2, lp.newaxis]
 
     # Extract substrate properties
-    res_pore_radius = eta[..., 0, np.newaxis]
-    permeability = eta[..., 1, np.newaxis]
+    res_pore_radius = eta[..., 0, lp.newaxis]
+    permeability = eta[..., 1, lp.newaxis]
 
     # Extract material properties
-    conductivity = eta[..., 2, np.newaxis]
-    surface_tension = eta[..., 3, np.newaxis]
-    density = eta[..., 4, np.newaxis]
-    viscosity = eta[..., 5, np.newaxis]
+    conductivity = eta[..., 2, lp.newaxis]
+    surface_tension = eta[..., 3, lp.newaxis]
+    density = eta[..., 4, lp.newaxis]
+    viscosity = eta[..., 5, lp.newaxis]
 
     # Extract beam properties
-    charge_to_mass = eta[..., 6, np.newaxis]
+    charge_to_mass = eta[..., 6, lp.newaxis]
 
     # Extract emitter geometries
     geo_data = eta[..., 7:].reshape((*eta_shape, Nx, Ne, 7))
@@ -378,7 +247,7 @@ def electrospray_current_model_cpu(x, theta, eta):
     # del geo_data
 
     # Calculate some quantities common to all emitters and emission sites   # (Nx, 1)
-    hydraulic_resistivity = viscosity / (2 * np.pi * permeability)
+    hydraulic_resistivity = viscosity / (2 * lp.pi * permeability)
     res_pressure = -2 * surface_tension / res_pore_radius
 
     # Compute electric field
@@ -392,54 +261,57 @@ def electrospray_current_model_cpu(x, theta, eta):
     no_sites_mask = applied_electric_pressure < min_cap_pressure - res_pressure
     all_sites_mask = applied_electric_pressure > max_cap_pressure - res_pressure
 
-    A_emission = 2 * np.pi * curvature_radius ** 2 * (1 - np.sin(half_angle))
-    A_Taylor = np.pi * ((pool_radius + loc_pore_radius) / 2) ** 2
+    A_emission = 2 * lp.pi * curvature_radius ** 2 * (1 - lp.sin(half_angle))
+    A_Taylor = lp.pi * ((pool_radius + loc_pore_radius) / 2) ** 2
     max_sites = A_emission / A_Taylor
 
-    num_sites = np.where(all_sites_mask, np.floor(max_sites), 0)            # (..., Nx, Ne)
+    num_sites = lp.where(all_sites_mask, lp.floor(max_sites), 0)            # (..., Nx, Ne)
     neither_mask = ~(no_sites_mask | all_sites_mask)
 
     # Ignore errors from bad sites that we don't need
     with np.errstate(divide='ignore', invalid='ignore'):
         min_site_radius = 2 * surface_tension / (1 / 2 * VACUUM_PERMITTIVITY * applied_field ** 2 + res_pressure)
-        arr = np.floor(1 + (max_sites - 1) * (1 - (min_site_radius - loc_pore_radius) / pool_radius) ** 4)
-        num_sites = num_sites + np.where(neither_mask, arr, 0)
+        arr = lp.floor(1 + (max_sites - 1) * (1 - (min_site_radius - loc_pore_radius) / pool_radius) ** 4)
+        num_sites = num_sites + lp.where(neither_mask, arr, 0)
 
-        Ns_max = np.max(num_sites).astype(int)
-        site_nums = np.arange(Ns_max).reshape(((1,)*len(num_sites.shape) + (Ns_max,))) + 1      # (...1, Ns_max)
-        active_mask = site_nums <= num_sites[..., np.newaxis]                                   # (..., Ns_max)
+        Ns_max = int(lp.max(num_sites).astype(int))
+        site_nums = lp.arange(Ns_max).reshape(((1,)*int(len(num_sites.shape)) + (Ns_max,))) + 1      # (...1, Ns_max)
+        active_mask = site_nums <= num_sites[..., lp.newaxis]                                   # (..., Ns_max)
 
         # Compute site radius
-        site_radius = pool_radius[..., np.newaxis] * (1 - ((site_nums-1) / (max_sites[..., np.newaxis]-1)) ** 0.25) + \
-                      loc_pore_radius[..., np.newaxis]
+        site_radius = pool_radius[..., lp.newaxis] * (1 - ((site_nums-1) / (max_sites[..., lp.newaxis]-1)) ** 0.25) + \
+                      loc_pore_radius[..., lp.newaxis]
 
         # Compute characteristic pressure
-        char_pressure = 2 * surface_tension[..., np.newaxis] / site_radius
+        char_pressure = 2 * surface_tension[..., lp.newaxis] / site_radius
 
         # Compute characteristic electric field and onset field
-        char_elec_field = np.sqrt(2 * char_pressure / VACUUM_PERMITTIVITY)
-        onset_field = np.sqrt((2 * (char_pressure - res_pressure[..., np.newaxis])) / VACUUM_PERMITTIVITY)
-        dimless_applied_field = applied_field[..., np.newaxis] / char_elec_field
+        char_elec_field = lp.sqrt(2 * char_pressure / VACUUM_PERMITTIVITY)
+        onset_field = lp.sqrt((2 * (char_pressure - res_pressure[..., lp.newaxis])) / VACUUM_PERMITTIVITY)
+        dimless_applied_field = applied_field[..., lp.newaxis] / char_elec_field
         dimless_onset_field = onset_field / char_elec_field
 
         # Compute hydraulic impedance
-        hydraulic_impedance = num_sites * hydraulic_resistivity / (1 - np.cos(half_angle)) * \
-                              (np.tan(half_angle) / curvature_radius - np.cos(half_angle) / emitter_height)
-        dimless_res_pressure = res_pressure[..., np.newaxis] / char_pressure
-        dimless_hydraulic_impedance = conductivity[..., np.newaxis] * char_elec_field * site_radius ** 2 * \
-                                      hydraulic_impedance[..., np.newaxis] / (char_pressure * density[..., np.newaxis] *
-                                                                     charge_to_mass[..., np.newaxis])
+        hydraulic_impedance = num_sites * hydraulic_resistivity / (1 - lp.cos(half_angle)) * \
+                              (lp.tan(half_angle) / curvature_radius - lp.cos(half_angle) / emitter_height)
+        dimless_res_pressure = res_pressure[..., lp.newaxis] / char_pressure
+        dimless_hydraulic_impedance = conductivity[..., lp.newaxis] * char_elec_field * site_radius ** 2 * \
+                                      hydraulic_impedance[..., lp.newaxis] / (char_pressure * density[..., lp.newaxis] *
+                                                                     charge_to_mass[..., lp.newaxis])
 
         # Compute current emitted by each active site
-        dimless_current = (ion_emis_offset[..., np.newaxis] + ion_emis_slope[..., np.newaxis] * (dimless_applied_field -
+        dimless_current = (ion_emis_offset[..., lp.newaxis] + ion_emis_slope[..., lp.newaxis] * (dimless_applied_field -
                             dimless_onset_field) + dimless_res_pressure) / dimless_hydraulic_impedance
 
-        arr = dimless_current * conductivity[..., np.newaxis] * char_elec_field * site_radius ** 2
+        arr = dimless_current * conductivity[..., lp.newaxis] * char_elec_field * site_radius ** 2
 
-    site_current = np.where(active_mask, arr, 0)
+    site_current = lp.where(active_mask, arr, 0)
     site_current[site_current < 0] = 0
 
     # Sum current over all sites and emitters
-    current = np.sum(site_current, axis=(-1, -2))[..., np.newaxis]   # (..., 1)
+    current = lp.sum(site_current, axis=(-1, -2))[..., lp.newaxis]   # (..., 1)
+
+    if gpu:
+        current = lp.asnumpy(current)
 
     return current

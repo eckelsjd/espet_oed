@@ -6,9 +6,9 @@ from joblib import Parallel
 import logging
 import time
 import sys
-sys.path.extend('..')
+sys.path.append('..')
 from src.utils import linear_eig, ax_default, get_cycle, fix_input_shape, electrospray_samplers
-from src.models import linear_gaussian_model, custom_nonlinear, electrospray_current_model_cpu
+from src.models import linear_gaussian_model, custom_nonlinear, electrospray_current_model
 from src.nmc import eig_nmc_pm
 from src.lg import eig_lg
 
@@ -94,23 +94,23 @@ def test_nmc(model='linear'):
         Nx = 50
         d = np.linspace(800, 1845, Nx)
         theta_sampler, eta_sampler = electrospray_samplers()
-        model_func = electrospray_current_model_cpu
-        N = 256  # 2000
-        M = 10  # 5000
-        Nr = 10
-        bs = 5
+        model_func = lambda *args, **kwargs: electrospray_current_model(*args, **kwargs, gpu=True)
+        N = 10  # 10000
+        M = 100  # 500
+        Nr = 4  # 20
+        bs = 25  # 50
         exp_data = np.loadtxt('../data/training_data.txt', dtype=np.float32, delimiter='\t')
         gamma = np.mean(exp_data[2, :])
-        logging.info('Starting main electrospray ground truth')
+        print('Starting main electrospray ground truth')
         t1 = time.time()
         eig_estimate = np.zeros((Nr, Nx))
-        with Parallel(n_jobs=-1, verbose=9) as ppool:
+        with Parallel(n_jobs=2, verbose=9) as ppool:
             for i in range(Nr):
                 eig = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M, noise_cov=gamma,
-                                 reuse_samples=False, n_jobs=-1, batch_size=bs, replicates=1, ppool=ppool)
+                                 reuse_samples=False, n_jobs=2, batch_size=bs, replicates=1, ppool=ppool)
                 eig_estimate[i, :] = np.squeeze(eig, axis=0)
         t2 = time.time()
-        logging.info(f'Total time for N={N} M={M} Nr={Nr} bs={bs}: {t2-t1:.02} s')
+        print(f'Total time for N={N} M={M} Nr={Nr} bs={bs}: {t2-t1:.02} s')
         eig_truth = np.nanmean(eig_estimate, axis=0).reshape((1, Nx))
         np.savez(Path('../results') / f'nmc_{model}_eig_truth.npz', d=d, eig_truth=eig_estimate)
         eig_lb_pm = np.nanpercentile(eig_estimate, 5, axis=0)
@@ -124,6 +124,7 @@ def test_nmc(model='linear'):
         ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain')
         fig.set_size_inches(4.8, 3.6)
         fig.tight_layout()
+        plt.show()
         fig.savefig(str(Path('../results/figs') / f'nmc_{model}_eig_truth.png'), dpi=300, format='png')
         return
 

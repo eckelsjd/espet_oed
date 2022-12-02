@@ -4,7 +4,7 @@ import time
 import logging
 from pathlib import Path
 
-from src.models import electrospray_current_model_cpu, nonlinear_model, linear_gaussian_model
+from src.models import electrospray_current_model, nonlinear_model, linear_gaussian_model
 from src.models import custom_nonlinear
 from src.nmc import eig_nmc_pm, eig_nmc
 from src.mcla import eig_mcla_pm, eig_mcla
@@ -162,7 +162,7 @@ def test_array_current_model(dim=1):
 
     if dim == 1:
         x_loc = np.linspace(800, 1840, Nx).reshape((Nx, 1))
-        eig = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, electrospray_current_model_cpu, N=N, M1=M1, M2=M2,
+        eig = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, electrospray_current_model, N=N, M1=M1, M2=M2,
                          noise_cov=var, reuse_samples=False, n_jobs=n_jobs, batch_size=bs)
         plt.figure()
         plt.plot(x_loc, eig, '-k')
@@ -178,7 +178,7 @@ def test_array_current_model(dim=1):
         pt_grids = np.meshgrid(*loc)
         x_loc = np.vstack([grid.ravel() for grid in pt_grids]).T  # (np.prod(Nx), x_dim)
         noise_cov = np.eye(2)*var
-        model_func = lambda x, theta, eta: model_1d_batch(x, theta, eta, electrospray_current_model_cpu)
+        model_func = lambda x, theta, eta: model_1d_batch(x, theta, eta, electrospray_current_model)
         eig = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model_func, N=N, M1=M1, M2=M2,
                          noise_cov=noise_cov, reuse_samples=True, n_jobs=n_jobs)
 
