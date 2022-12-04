@@ -15,7 +15,7 @@ from src.utils import model_1d_batch, ax_default, linear_eig, electrospray_sampl
 def test_linear_gaussian_model(estimator='nmc'):
     # Linear gaussian model example
     N = 500
-    M = 50
+    M = 500
     Nx = 50
     Nr = 20
     noise_var = 0.01
@@ -41,11 +41,11 @@ def test_linear_gaussian_model(estimator='nmc'):
 
     # Compute estimator EIG
     if estimator == 'nmc':
-        # eig_estimate = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, linear_gaussian_model, N=N, M1=M, M2=M,
-        #                           noise_cov=noise_cov, reuse_samples=False, n_jobs=-1, batch_size=-1, replicates=Nr)
-        theta_sampler = lambda shape: np.random.randn(*shape, 2) * np.sqrt(prior_cov) + prior_mean
-        eig_estimate = eig_nmc(x_loc, theta_sampler, linear_gaussian_model, N=N, M=M, replicates=Nr,
-                               noise_cov=noise_cov, reuse_samples=False, n_jobs=-1)
+        eig_estimate = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, linear_gaussian_model, N=N, M1=M, M2=M,
+                                  noise_cov=noise_cov, reuse_samples=False, n_jobs=-1, batch_size=-1, replicates=Nr)
+        # theta_sampler = lambda shape: np.random.randn(*shape, 2) * np.sqrt(prior_cov) + prior_mean
+        # eig_estimate = eig_nmc(x_loc, theta_sampler, linear_gaussian_model, N=N, M=M, replicates=Nr,
+        #                        noise_cov=noise_cov, reuse_samples=False, n_jobs=-1)
     elif estimator == 'mcla':
         pass
         # Marginal
@@ -60,22 +60,22 @@ def test_linear_gaussian_model(estimator='nmc'):
         #                         noise_cov=noise_cov, replicates=Nr, n_jobs=-1, batch_size=-1)
 
     # Compute percentiles over replicates
-    # eig_lb = np.nanpercentile(eig_estimate, 5, axis=0)
-    # eig_med = np.nanpercentile(eig_estimate, 50, axis=0)
-    # eig_ub = np.nanpercentile(eig_estimate, 95, axis=0)
+    eig_lb = np.nanpercentile(eig_estimate, 5, axis=0)
+    eig_med = np.nanpercentile(eig_estimate, 50, axis=0)
+    eig_ub = np.nanpercentile(eig_estimate, 95, axis=0)
 
     fig, ax = plt.subplots()
     ax.plot(d, eig_truth_marg, '--k', label=r'Marginal $p(\theta)$')
     ax.plot(d, eig_truth_joint, '-k', label=r'Joint $p(\theta, \phi)$')
-    # ax.plot(d, eig_med, '-r', label=r'Estimator')
-    # ax.fill_between(d, eig_lb, eig_ub, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
+    ax.plot(d, eig_med, '-r', label=r'Estimator')
+    ax.fill_between(d, eig_lb, eig_ub, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
     ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
     ax.set_xlim(left=0, right=1)
     ax.set_ylim(bottom=-0.01)
     fig.set_size_inches(4.8, 3.6)
     plt.tight_layout()
     plt.show()
-    fig.savefig(str(Path('../results/figs') / f'linear-eig.png'), dpi=300, format='png')
+    # fig.savefig(str(Path('../results/figs') / f'linear-eig.png'), dpi=300, format='png')
 
 
 def test_1d_nonlinear_model():
@@ -83,30 +83,30 @@ def test_1d_nonlinear_model():
     prior_cov = 0.4**2
     # theta_sampler = lambda shape: np.random.randn(*shape, 1)*np.sqrt(prior_cov) + prior_mean
     theta_sampler = lambda shape: np.random.rand(*shape, 1)
-    N = 2000
-    M = 1000
+    N = 1000
+    M = 500
     Nx = 50
     x_loc = np.linspace(0, 1, Nx).reshape((Nx, 1))
     d = np.squeeze(x_loc)
     var = 1e-4
-    eig = eig_nmc(x_loc, theta_sampler, nonlinear_model, N=N, M=M, replicates=10, noise_cov=var, reuse_samples=False,
+    eig = eig_nmc(x_loc, theta_sampler, nonlinear_model, N=N, M=M, replicates=50, noise_cov=var, reuse_samples=False,
                   n_jobs=-1)
     eig_lb = np.nanpercentile(eig, 5, axis=0)
     eig_med = np.nanpercentile(eig, 50, axis=0)
     eig_ub = np.nanpercentile(eig, 95, axis=0)
 
     # MCLA estimator
-    eig_est = eig_mcla(x_loc, theta_sampler, nonlinear_model, prior_mean, prior_cov, N=N, Ne=10, noise_cov=var,
-                       replicates=10, n_jobs=-1, batch_size=-1)
-    eig_est_lb = np.nanpercentile(eig_est, 5, axis=0)
-    eig_est_med = np.nanpercentile(eig_est, 50, axis=0)
-    eig_est_ub = np.nanpercentile(eig_est, 95, axis=0)
+    # eig_est = eig_mcla(x_loc, theta_sampler, nonlinear_model, prior_mean, prior_cov, N=N, Ne=10, noise_cov=var,
+    #                    replicates=10, n_jobs=-1, batch_size=-1)
+    # eig_est_lb = np.nanpercentile(eig_est, 5, axis=0)
+    # eig_est_med = np.nanpercentile(eig_est, 50, axis=0)
+    # eig_est_ub = np.nanpercentile(eig_est, 95, axis=0)
 
     fig, ax = plt.subplots()
     ax.plot(d, eig_med, '-k', label=r'NMC')
     ax.fill_between(d, eig_lb, eig_ub, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='gray')
-    ax.plot(d, eig_est_med, '-r', label=r'MCLA')
-    ax.fill_between(d, eig_est_lb, eig_est_ub, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
+    # ax.plot(d, eig_est_med, '-r', label=r'MCLA')
+    # ax.fill_between(d, eig_est_lb, eig_est_ub, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
     ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
     ax.set_xlim(left=0, right=1)
     fig.set_size_inches(4.8, 3.6)
@@ -150,27 +150,33 @@ def test_array_current_model(dim=1):
 
     # Experimental data
     exp_data = np.loadtxt('../data/training_data.txt', dtype=np.float32, delimiter='\t')
-    var = 2 * np.max(exp_data[2, :])
+    var = np.mean(exp_data[2, :])
 
     # Set sample sizes
-    N = 500
-    Nx = 40
-    M1 = 300
-    M2 = 300
+    N = 100
+    Nx = 50
+    M = 10
     n_jobs = -1
-    bs = -1
+    bs = 10
+    Nr = 10
 
     if dim == 1:
-        x_loc = np.linspace(800, 1840, Nx).reshape((Nx, 1))
-        eig = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, electrospray_current_model, N=N, M1=M1, M2=M2,
-                         noise_cov=var, reuse_samples=False, n_jobs=n_jobs, batch_size=bs)
-        plt.figure()
-        plt.plot(x_loc, eig, '-k')
-        plt.xlabel('Voltage [V]')
-        plt.ylabel('Expected information gain')
-        plt.show()
+        x_loc = np.linspace(800, 1845, Nx).reshape((Nx, 1))
+        d = np.squeeze(x_loc)
+        eig_estimate = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, electrospray_current_model, N=N, M1=M, M2=M,
+                         noise_cov=var, reuse_samples=False, n_jobs=n_jobs, batch_size=bs, replicates=Nr)
+        eig_lb_pm = np.nanpercentile(eig_estimate, 5, axis=0)
+        eig_med_pm = np.nanpercentile(eig_estimate, 50, axis=0)
+        eig_ub_pm = np.nanpercentile(eig_estimate, 95, axis=0)
 
-        return eig
+        fig, ax = plt.subplots()
+        ax.plot(d, eig_med_pm, '-r', label=r'Marginal p($\theta$)')
+        ax.fill_between(d, eig_lb_pm, eig_ub_pm, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
+        ax.set_ylim(bottom=-0.01)
+        ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain')
+        fig.set_size_inches(4.8, 3.6)
+        fig.tight_layout()
+        plt.show()
 
     if dim == 2:
         Ngrid = [Nx, Nx]
@@ -261,8 +267,8 @@ def test_lg():
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    # eig = test_array_current_model(dim=1)
+    # test_linear_gaussian_model(estimator='nmc')
     # test_custom_nonlinear()
     # test_1d_nonlinear_model()
-    # test_linear_gaussian_model(estimator='mcla')
-    test_lg()
+    test_array_current_model(dim=1)
+    # test_lg()

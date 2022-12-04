@@ -56,11 +56,19 @@ def eig_nmc(x_loc, theta_sampler, model, N=100, M=100, noise_cov=1.0, reuse_samp
     def parallel_func(idx, y_i, g_theta_i, evidence):
         y_curr = y_i[idx, np.newaxis, :, :, :]                          # (1, Nr, Nx, y_dim)
         if reuse_samples:
-            evidence[idx, :, :] = np.mean(batch_normal_pdf(y_curr, g_theta_i, noise_cov), axis=0)
+            log_like = batch_normal_pdf(y_curr, g_theta_i, noise_cov, logpdf=True)  # (N, Nr, Nx)
+            max_log_like = np.expand_dims(np.max(log_like, axis=0), axis=0)  # (1, Nr, Nx)
+            evidence[idx, :, :] = -np.log(N) + np.squeeze(max_log_like, axis=0) + \
+                                  np.log(np.sum(np.exp(log_like - max_log_like), axis=0))
+            # evidence[idx, :, :] = np.mean(batch_normal_pdf(y_curr, g_theta_i, noise_cov), axis=0)
         else:
             theta_j = theta_sampler((M, Nr, Nx)).astype(np.float32)     # (M, Nr, Nx, theta_dim)
             g_theta_j = model(x_loc, theta_j)                           # (M, Nr, Nx, y_dim)
-            evidence[idx, :, :] = np.mean(batch_normal_pdf(y_curr, g_theta_j, noise_cov), axis=0)
+            log_like = batch_normal_pdf(y_curr, g_theta_j, noise_cov, logpdf=True)  # (M, Nr, Nx)
+            max_log_like = np.expand_dims(np.max(log_like, axis=0), axis=0)  # (1, Nr, bs)
+            evidence[idx, :, :] = -np.log(M) + np.squeeze(max_log_like, axis=0) + \
+                                  np.log(np.sum(np.exp(log_like - max_log_like), axis=0))
+            # evidence[idx, :, :] = np.mean(batch_normal_pdf(y_curr, g_theta_j, noise_cov), axis=0)
 
         if ((idx + 1) % 100) == 0 and n_jobs == 1:
             logging.info(f'Samples processed: {idx + 1} out of {N}')
@@ -72,10 +80,13 @@ def eig_nmc(x_loc, theta_sampler, model, N=100, M=100, noise_cov=1.0, reuse_samp
         ppool(delayed(parallel_func)(idx, y_i, g_theta_i, evidence) for idx in range(N))
 
     # Compute likelihood
-    likelihood = batch_normal_pdf(y_i, g_theta_i, noise_cov)        # (N, Nr, Nx)
+    likelihood = batch_normal_pdf(y_i, g_theta_i, noise_cov, logpdf=True)        # (N, Nr, Nx)
 
     # Expected information gain
-    eig = np.mean(np.log(likelihood) - np.log(evidence), axis=0)    # (Nr, Nx)
+    likelihood = np.nan_to_num(likelihood, neginf=np.nan, posinf=np.nan)
+    evidence = np.nan_to_num(evidence, neginf=np.nan, posinf=np.nan)
+    eig = np.nanmean(likelihood - evidence, axis=0)  # (Nr, Nx)
+    # eig = np.mean(np.log(likelihood) - np.log(evidence), axis=0)    # (Nr, Nx)
 
     # Clean up
     del theta_i
@@ -163,24 +174,42 @@ def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, 
             theta_curr = theta_i[idx, np.newaxis, :, b_slice, :]                       # (1, Nr, bs, theta_dim)
             if reuse_samples:
                 # Compute evidence
-                evidence[idx, :, b_slice] = np.mean(batch_normal_pdf(y_curr, g_theta_i[:, :, b_slice, :], noise_cov),
-                                                    axis=0)
+                log_like = batch_normal_pdf(y_curr, g_theta_i[:, :, b_slice, :], noise_cov, logpdf=True)  # (M1, Nr, bs)
+                max_log_like = np.expand_dims(np.max(log_like, axis=0), axis=0)  # (1, Nr, bs)
+                evidence[idx, :, b_slice] = -np.log(N) + np.squeeze(max_log_like, axis=0) + \
+                                            np.log(np.sum(np.exp(log_like - max_log_like), axis=0))
+                # evidence[idx, :, b_slice] = np.mean(batch_normal_pdf(y_curr, g_theta_i[:, :, b_slice, :], noise_cov),
+                #                                     axis=0)
+
                 # Compute likelihood
                 g_theta_k = model(x_loc[b_slice, :], theta_curr, eta_i[:, :, b_slice, :])  # (N, Nr, bs, y_dim)
-                likelihood[idx, :, b_slice] = np.mean(batch_normal_pdf(y_curr, g_theta_k, noise_cov), axis=0)
+                log_like = batch_normal_pdf(y_curr, g_theta_k, noise_cov, logpdf=True)
+                max_log_like = np.expand_dims(np.max(log_like, axis=0), axis=0)
+                likelihood[idx, :, b_slice] = -np.log(N) + np.squeeze(max_log_like, axis=0) + \
+                                              np.log(np.sum(np.exp(log_like - max_log_like), axis=0))
+                # likelihood[idx, :, b_slice] = np.mean(batch_normal_pdf(y_curr, g_theta_k, noise_cov), axis=0)
             else:
                 # Compute evidence
                 eta_j = eta_sampler((M1, Nr, batch_size)).astype(np.float32)            # (M1, Nr, bs, eta_dim)
                 theta_j = theta_sampler((M1, Nr, batch_size)).astype(np.float32)        # (M1, Nr, bs, theta_dim)
                 g_theta_j = model(x_loc[b_slice, :], theta_j, eta_j)                    # (M1, Nr, bs, y_dim)
-                evidence[idx, :, b_slice] = np.mean(batch_normal_pdf(y_curr, g_theta_j, noise_cov), axis=0)
+                log_like = batch_normal_pdf(y_curr, g_theta_j, noise_cov, logpdf=True)  # (M1, Nr, bs)
+                max_log_like = np.expand_dims(np.max(log_like, axis=0), axis=0)         # (1, Nr, bs)
+                evidence[idx, :, b_slice] = -np.log(M1) + np.squeeze(max_log_like, axis=0) + \
+                                            np.log(np.sum(np.exp(log_like - max_log_like), axis=0))
+                # evidence[idx, :, b_slice] = np.mean(batch_normal_pdf(y_curr, g_theta_j, noise_cov), axis=0)
 
                 # Compute likelihood
                 eta_k = eta_sampler((M2, Nr, batch_size)).astype(np.float32)            # (M2, Nr, bs, eta_dim)
                 g_theta_k = model(x_loc[b_slice, :], theta_curr, eta_k)                 # (M2, Nr, bs, y_dim)
-                likelihood[idx, :, b_slice] = np.mean(batch_normal_pdf(y_curr, g_theta_k, noise_cov), axis=0)
+                log_like = batch_normal_pdf(y_curr, g_theta_k, noise_cov, logpdf=True)
+                max_log_like = np.expand_dims(np.max(log_like, axis=0), axis=0)
+                likelihood[idx, :, b_slice] = -np.log(M2) + np.squeeze(max_log_like, axis=0) + \
+                                              np.log(np.sum(np.exp(log_like - max_log_like), axis=0))
+                # likelihood[idx, :, b_slice] = np.mean(batch_normal_pdf(y_curr, g_theta_k, noise_cov), axis=0)
 
-        print(f'Parallel idx {idx}: {time.time()-t1:.02} s')
+        if idx % 500 == 0:
+            print(f'Parallel idx {idx}: {time.time()-t1:.02} s')
 
     # Compute evidence p(y|d) and likelihood p(y|theta, d)
     if ppool is None:
@@ -190,7 +219,10 @@ def eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model, N=100, M1=100, M2=100, 
         ppool(delayed(parallel_func)(idx, theta_i, eta_i, y_i, g_theta_i, likelihood, evidence) for idx in range(N))
 
     # Expected information gain
-    eig = np.mean(np.log(likelihood) - np.log(evidence), axis=0)    # (Nr, Nx)
+    likelihood = np.nan_to_num(likelihood, neginf=np.nan, posinf=np.nan)
+    evidence = np.nan_to_num(evidence, neginf=np.nan, posinf=np.nan)
+    eig = np.nanmean(likelihood - evidence, axis=0)  # (Nr, Nx)
+    # eig = np.mean(np.log(likelihood) - np.log(evidence), axis=0)    # (Nr, Nx)
 
     # Clean up
     del theta_i

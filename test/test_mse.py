@@ -95,19 +95,18 @@ def test_nmc(model='linear'):
         d = np.linspace(800, 1845, Nx)
         theta_sampler, eta_sampler = electrospray_samplers()
         model_func = lambda *args, **kwargs: electrospray_current_model(*args, **kwargs, gpu=True)
-        N = 10  # 10000
-        M = 100  # 500
-        Nr = 4  # 20
-        bs = 25  # 50
+        N = 2000  # 10000
+        M = 1500  # 500
+        Nr = 20  # 20
+        bs = 1  # 50
         exp_data = np.loadtxt('../data/training_data.txt', dtype=np.float32, delimiter='\t')
         gamma = np.mean(exp_data[2, :])
-        print('Starting main electrospray ground truth')
         t1 = time.time()
         eig_estimate = np.zeros((Nr, Nx))
-        with Parallel(n_jobs=2, verbose=9) as ppool:
+        with Parallel(n_jobs=-1, verbose=9) as ppool:
             for i in range(Nr):
                 eig = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M, noise_cov=gamma,
-                                 reuse_samples=False, n_jobs=2, batch_size=bs, replicates=1, ppool=ppool)
+                                 reuse_samples=False, n_jobs=-1, batch_size=bs, replicates=1, ppool=ppool)
                 eig_estimate[i, :] = np.squeeze(eig, axis=0)
         t2 = time.time()
         print(f'Total time for N={N} M={M} Nr={Nr} bs={bs}: {t2-t1:.02} s')
@@ -153,12 +152,11 @@ def test_nmc(model='linear'):
             # Run NMC estimator
             eig_estimate = np.zeros((N_MC, Nx))
             with Parallel(n_jobs=-1, verbose=9) as ppool:
-                for i in range(N_MC):
+                for k in range(N_MC):
                     eig = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M, noise_cov=gamma,
-                                     reuse_samples=False, n_jobs=-1, batch_size=5, replicates=1, ppool=ppool)
-                    eig_estimate[i, :] = np.squeeze(eig, axis=0)
-            # eig_estimate = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M,
-            #                           noise_cov=gamma, reuse_samples=False, n_jobs=-1, replicates=N_MC)  # (N_MC, Nx)
+                                     reuse_samples=False, n_jobs=-1, batch_size=1, replicates=1, ppool=ppool)
+                    eig_estimate[k, :] = np.squeeze(eig, axis=0)
+
             # Filter arithmetic underflow
             eig_store[i, j, :, :] = np.nan_to_num(eig_estimate, posinf=np.nan, neginf=np.nan)
             mse_store[i, j, :] = np.nanmean((eig_store[i, j, :, :] - eig_truth) ** 2, axis=-1)  # (N_MC,)
@@ -250,28 +248,31 @@ def plot_nmc(model='linear', estimator='nmc'):
     for i, nm_ratio in enumerate(N_to_M):
         # Plot bias
         bias_mean = np.nanmean(np.abs(bias), axis=-1)   # (N_est, N_cost)
-        nx_var = np.nanvar(np.abs(bias), axis=-1)       # (N_est, N_cost)
-        std_err = np.sqrt(nx_var / Nx)
+        axs[0].plot(cost[i, :], bias_mean[i, :], linestyle='-', markersize=4, linewidth=1.3)
         axs[0].set_ylabel(r'Estimator bias')
-        axs[0].errorbar(cost[i, :], bias_mean[i, :], yerr=1.96 * std_err[i, :], linestyle='-',
-                        markersize=0, linewidth=1.3, capsize=2)
-        # axs[0].plot(cost[i, :], np.abs(bias_mean[i, :]), linestyle='-', markersize=1, linewidth=1.3)
+        # nx_var = np.nanvar(np.abs(bias), axis=-1)       # (N_est, N_cost)
+        # std_err = np.sqrt(nx_var / Nx)
+        # axs[0].errorbar(cost[i, :], bias_mean[i, :], yerr=1.96 * std_err[i, :], linestyle='-',
+        #                 markersize=0, linewidth=1.3, capsize=2)
 
         # Plot variance
         label = f"{int(nm_ratio)}:1" if nm_ratio >= 1 else f"1:{int(1 / nm_ratio)}"
         var_mean = np.nanmean(var, axis=-1)     # (N_est, N_cost)
-        nx_var = np.nanvar(var, axis=-1)        # (N_est, N_cost)
-        std_err = np.sqrt(nx_var / Nx)
+        axs[1].plot(cost[i, :], var_mean[i, :], linestyle='-', markersize=4, linewidth=1.3)
         axs[1].set_ylabel(r'Estimator variance')
-        axs[1].errorbar(cost[i, :], var_mean[i, :], yerr=1.96 * std_err[i, :], linestyle='-',
-                        markersize=0, linewidth=1.3, capsize=2, label=label)
+        # nx_var = np.nanvar(var, axis=-1)        # (N_est, N_cost)
+        # std_err = np.sqrt(nx_var / Nx)
+        # axs[1].errorbar(cost[i, :], var_mean[i, :], yerr=1.96 * std_err[i, :], linestyle='-',
+        #                 markersize=0, linewidth=1.3, capsize=2, label=label)
+
         # Plot MSE
         mse_mean = np.nanmean(mse, axis=-1)     # (N_est, N_cost)
-        nx_var = np.nanvar(mse, axis=-1)        # (N_est, N_cost)
-        std_err = np.sqrt(nx_var / Nx)
+        axs[2].plot(cost[i, :], mse_mean[i, :], linestyle='-', markersize=4, linewidth=1.3)
         axs[2].set_ylabel(r'Estimator MSE')
-        axs[2].errorbar(cost[i, :], mse_mean[i, :], yerr=1.96 * std_err[i, :], linestyle='-',
-                        markersize=0, linewidth=1.3, capsize=2)
+        # nx_var = np.nanvar(mse, axis=-1)        # (N_est, N_cost)
+        # std_err = np.sqrt(nx_var / Nx)
+        # axs[2].errorbar(cost[i, :], mse_mean[i, :], yerr=1.96 * std_err[i, :], linestyle='-',
+        #                 markersize=0, linewidth=1.3, capsize=2)
 
     axs[0].set_ylim(bottom=3e-5)
     fig.set_size_inches(9, 3.5)
