@@ -206,7 +206,7 @@ def electrospray_current_model(x, theta, eta, gpu=False):
 
     # Problem setup
     VACUUM_PERMITTIVITY = 8.8542e-12
-    Ne = int(lp.floor((eta_dim - 7) / 7))    # number of emitters
+    Ne = int(lp.floor((eta_dim - 6) / 7))    # number of emitters
     assert theta_dim == 3
 
     # Extract model parameters
@@ -215,20 +215,21 @@ def electrospray_current_model(x, theta, eta, gpu=False):
     pool_radius = theta[..., 2, lp.newaxis]
 
     # Extract substrate properties
-    res_pore_radius = eta[..., 0, lp.newaxis]
-    permeability = eta[..., 1, lp.newaxis]
+    # res_pore_radius = eta[..., 0, lp.newaxis]
+    res_pore_radius = 8e-6
+    permeability = eta[..., 0, lp.newaxis]
 
     # Extract material properties
-    conductivity = eta[..., 2, lp.newaxis]
-    surface_tension = eta[..., 3, lp.newaxis]
-    density = eta[..., 4, lp.newaxis]
-    viscosity = eta[..., 5, lp.newaxis]
+    conductivity = eta[..., 1, lp.newaxis]
+    surface_tension = eta[..., 2, lp.newaxis]
+    density = eta[..., 2, lp.newaxis]
+    viscosity = eta[..., 4, lp.newaxis]
 
     # Extract beam properties
-    charge_to_mass = eta[..., 6, lp.newaxis]
+    charge_to_mass = eta[..., 5, lp.newaxis]
 
     # Extract emitter geometries
-    geo_data = eta[..., 7:].reshape((*eta_shape, Ne, 7))
+    geo_data = eta[..., 6:].reshape((*eta_shape, Ne, 7))
     curvature_radius = geo_data[..., 0]  # (..., Nx, Ne)
     gap_distance = geo_data[..., 1]
     aperture_radius = geo_data[..., 2]

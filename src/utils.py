@@ -79,10 +79,10 @@ def electrospray_samplers(Ne=576):
 
     def subs_sampler(shape):
         # rpr = np.random.rand(1, Nr) * (8e-6 - 5e-6) + 5e-6
-        rpr = np.ones((*shape, 1)) * 8e-6
+        # rpr = np.ones((*shape, 1)) * 8e-6
         kappa = np.random.randn(*shape, 1) * 6.04e-15 + 1.51e-13
-        subs = np.concatenate((rpr, kappa), axis=-1)
-        return subs  # (*, 2)
+        # subs = np.concatenate((rpr, kappa), axis=-1)
+        return kappa  # (*, 1)
 
     def eta_sampler(shape):
         # Load emitter data
