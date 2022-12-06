@@ -8,8 +8,8 @@ from src.models import electrospray_current_model, nonlinear_model, linear_gauss
 from src.models import custom_nonlinear
 from src.nmc import eig_nmc_pm, eig_nmc
 from src.mcla import eig_mcla_pm, eig_mcla
-from src.lg import eig_lg
-from src.utils import model_1d_batch, ax_default, linear_eig, electrospray_samplers
+from src.lg import eig_lg, linear_eig
+from src.utils import model_1d_batch, ax_default, electrospray_samplers
 
 
 def test_linear_gaussian_model(estimator='nmc'):
@@ -247,21 +247,43 @@ def test_custom_nonlinear():
     plt.show()
 
 
-def test_lg():
-    Nx = 50
-    theta_mean = np.array([0.5])
-    eta = np.array([0.5])
-    theta_var = 0.25**2
-    noise_cov = 0.01
-    x = np.linspace(0, 1, Nx)
+def test_lg(model='linear'):
+    x, theta_mean, eta_mean, theta_cov, eta_cov, noise_cov, gamma, model_func, eig_exact = 0, 0, 0, 0, 0, 0, 0, None, 0
+    if model == 'linear':
+        Nx = 50
+        x = np.linspace(0, 1, Nx)
+        theta_mean = 0
+        eta_mean = 0
+        theta_cov = 1
+        eta_cov = 1
+        noise_cov = 0.01
+        gamma = noise_cov * np.eye(2)
+        model_func = linear_gaussian_model
+        eig_exact = (1/2) * np.log(1 + x**2 / noise_cov)
+    elif model == 'nonlinear':
+        Nx = 50
+        x = np.linspace(0, 1, Nx)
+        theta_mean = 0.5
+        eta_mean = 0.5
+        theta_cov = 0.25**2
+        eta_cov = 0.25**2
+        noise_cov = 0.01
+        gamma = noise_cov*np.eye(1)
+        model_func = custom_nonlinear
+        data = np.load(str(Path('../results') / f'nmc_{model}.npz'))
+        eig_exact = data['eig_truth'].reshape((Nx,))
+    elif model == 'electrospray':
+        return 'nope'
 
     # Compute eig
-    eig_estimate = eig_lg(x, custom_nonlinear, theta_mean, theta_var, eta, noise_cov)
+    eig_estimate = eig_lg(x, model_func, theta_mean, theta_cov, eta_mean, eta_cov, gamma)
 
-    plt.figure()
-    plt.plot(x, eig_estimate, '--r')
-    plt.xlabel('Operating condition $d$')
-    plt.ylabel('Expected information gain')
+    fig, ax = plt.subplots()
+    ax.plot(x, eig_exact, '-k', label='Exact')
+    ax.plot(x, eig_estimate, '--r', label='Estimate')
+    ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
+    fig.set_size_inches(4.8, 3.6)
+    fig.tight_layout()
     plt.show()
 
 
@@ -270,5 +292,5 @@ if __name__ == '__main__':
     # test_linear_gaussian_model(estimator='nmc')
     # test_custom_nonlinear()
     # test_1d_nonlinear_model()
-    test_array_current_model(dim=1)
-    # test_lg()
+    # test_array_current_model(dim=1)
+    test_lg(model='nonlinear')

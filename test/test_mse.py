@@ -286,8 +286,30 @@ def plot_nmc(model='linear', estimator='nmc'):
     plt.show()
 
 
+def test_truth():
+    data = np.load(str(Path('../results') / f'nmc_electrospray_eig_truth.npz'))
+    d = data['d']
+    eig_estimate = data['eig_truth']
+    eig_lb_pm = np.nanpercentile(eig_estimate, 5, axis=0)
+    eig_med_pm = np.nanpercentile(eig_estimate, 50, axis=0)
+    eig_ub_pm = np.nanpercentile(eig_estimate, 95, axis=0)
+    eig_mean = np.nanmean(eig_estimate, axis=0)
+
+    fig, ax = plt.subplots()
+    sl = slice(0, -2)
+    ax.plot(d[sl], eig_med_pm[sl], '-r', label=r'Marginal p($\theta$)')
+    ax.fill_between(d[sl], eig_lb_pm[sl], eig_ub_pm[sl], alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
+    ax.plot(d[sl], eig_mean[sl], '-k', label=r'Mean')
+    ax.set_ylim(bottom=-0.01)
+    ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain')
+    fig.set_size_inches(4.8, 3.6)
+    fig.tight_layout()
+    plt.show()
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    test_nmc(model='electrospray')
+    # test_nmc(model='electrospray')
     # plot_nmc(model='nonlinear')
     # test_lg(model='nonlinear')
+    test_truth()

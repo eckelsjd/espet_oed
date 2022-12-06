@@ -14,8 +14,8 @@ def linear_gaussian_model(x, theta, eta=None):
     Parameters
     ----------
     x: (Nx, x_dim) input locations, or operating conditions
-    theta: (*, Nx, theta_dim) model parameters
-    eta: (*, Nx, eta_dim) nuisance parameters
+    theta: (*, theta_dim) model parameters
+    eta: (*, eta_dim) nuisance parameters
 
     Nx: Number of input locations
     x_dim: Dimension of operating conditions
@@ -41,26 +41,20 @@ def linear_gaussian_model(x, theta, eta=None):
         eta = np.atleast_1d(eta)
         if len(eta.shape) == 1:
             eta = np.expand_dims(eta, axis=0)
-    theta_shape = theta.shape[:-2]
     theta_dim = theta.shape[-1]
-    eta_shape = eta.shape[:-2]
+    shape = eta.shape[:-1]
     eta_dim = eta.shape[-1]
     y_dim = 2
 
-    x = x.reshape((1,) * len(eta_shape) + (Nx, x_dim))  # (...1, Nx, x_dim)
-    model_eval = np.zeros((*eta_shape, Nx, y_dim), dtype=np.float32)
+    x = x.reshape((1,) * (len(shape)-1) + (Nx, x_dim))  # (...1, Nx, x_dim)
+    model_eval = np.zeros((*eta.shape[:-2], Nx, y_dim), dtype=np.float32)
 
     # 1 model param, 1 nuisance param and 1 input location
     x = np.squeeze(x, axis=-1)              # (...1, Nx)
     theta = np.squeeze(theta, axis=-1)      # (*, Nx)
     eta = np.squeeze(eta, axis=-1)          # (*, Nx)
 
-    y1 = x * theta                          # (*, Nx) or (1, Nx)
-    if y1.shape[0] == 1:
-        # If reusing samples of theta
-        tile_axis = (eta_shape[0],) + (1,)*(len(eta_shape)-1) + (1,)  # (*, 1..., 1), only tile on first axis of eta
-        y1 = np.tile(y1, tile_axis)         # (*, Nx)
-
+    y1 = x * theta                          # (*, Nx)
     y2 = (1 - x) * eta                      # (*, Nx)
 
     y = np.concatenate((np.expand_dims(y1, axis=-1), np.expand_dims(y2, axis=-1)), axis=-1)  # (*, Nx, 2)
@@ -121,8 +115,8 @@ def custom_nonlinear(x, theta, eta=None, env_var=0.1**2, wavelength=0.5, wave_am
     Parameters
     ----------
     x: (Nx, x_dim) Input locations
-    theta: (*, Nx, theta_dim) Model parameters
-    eta: (*, Nx, eta_dim) Nuisance parameters
+    theta: (*, theta_dim) Model parameters
+    eta: (*, eta_dim) Nuisance parameters
     env_var: Variance of Gaussian envelope
     wavelength: Sinusoidal perturbation wavelength
     wave_amp: Amplitude of perturbation
@@ -147,15 +141,14 @@ def custom_nonlinear(x, theta, eta=None, env_var=0.1**2, wavelength=0.5, wave_am
         eta = np.atleast_1d(eta)
         if len(eta.shape) == 1:
             eta = np.expand_dims(eta, axis=0)
-    theta_shape = theta.shape[:-2]
     theta_dim = theta.shape[-1]
-    eta_shape = eta.shape[:-2]
+    shape = eta.shape[:-1]
     eta_dim = eta.shape[-1]
     y_dim = x_dim
     assert y_dim == x_dim == 1
 
-    x = x.reshape((1,) * len(eta_shape) + (Nx, x_dim))  # (...1, Nx, x_dim)
-    model_eval = np.zeros((*eta_shape, Nx, y_dim), dtype=np.float32)
+    x = x.reshape((1,) * (len(shape)-1) + (Nx, x_dim))  # (...1, Nx, x_dim)
+    model_eval = np.zeros((*eta.shape[:-2], Nx, y_dim), dtype=np.float32)
 
     # 1 model param, 1 nuisance param and 1 input location
     x = np.squeeze(x, axis=-1)  # (...1, Nx)
@@ -205,12 +198,11 @@ def electrospray_current_model(x, theta, eta, gpu=False):
     eta = lp.atleast_1d(eta).astype(lp.float32)
     if len(eta.shape) == 1:
         eta = lp.expand_dims(eta, axis=0)
-    theta_shape = theta.shape[:-2]
     theta_dim = theta.shape[-1]
-    eta_shape = eta.shape[:-2]
+    eta_shape = eta.shape[:-1]
     eta_dim = eta.shape[-1]
     y_dim = 1
-    voltage = x.reshape((1,) * len(eta_shape) + (Nx, x_dim))  # (...1, Nx, x_dim)
+    voltage = x.reshape((1,) * (len(eta_shape)-1) + (Nx, x_dim))  # (...1, Nx, x_dim)
 
     # Problem setup
     VACUUM_PERMITTIVITY = 8.8542e-12
@@ -236,7 +228,7 @@ def electrospray_current_model(x, theta, eta, gpu=False):
     charge_to_mass = eta[..., 6, lp.newaxis]
 
     # Extract emitter geometries
-    geo_data = eta[..., 7:].reshape((*eta_shape, Nx, Ne, 7))
+    geo_data = eta[..., 7:].reshape((*eta_shape, Ne, 7))
     curvature_radius = geo_data[..., 0]  # (..., Nx, Ne)
     gap_distance = geo_data[..., 1]
     aperture_radius = geo_data[..., 2]

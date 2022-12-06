@@ -109,43 +109,46 @@ def electrospray_samplers(Ne=576):
 
 
 def approx_jacobian(func, d, theta, eta, pert=0.01):
-    """Approximate Jacobian of the function at a specified theta location
+    """Approximate Jacobian of the function at a specified theta/eta location
     Parameters
     ----------
     func: expects to be called as func(d, theta, eta), returns (*, Nx, y_dim)
     d: (Nx, x_dim) model input locations
     theta: (*, theta_dim) point to linearize model about
-    eta: (*, Nx, eta_dim) nuisance parameters needed to run the model
+    eta: (*, eta_dim) nuisance point to linearize model about
     pert: Perturbation for approximate partial derivatives
 
     Returns
     -------
-    J: (*, Nx, y_dim, theta_dim) The approximate Jacobian (y_dim, theta_dim) at locations (*, Nx)
+    J: (*, Nx, y_dim, theta_dim+eta_dim) The approximate Jacobian (y_dim, theta_dim+eta_dim) at locations (*, Nx)
     """
     f = func(d, theta, eta)         # (*, Nx, y_dim)
     shape = theta.shape[:-1]        # (*)
-    theta_dim = theta.shape[-1]     # Number of parameters
+    theta_dim = theta.shape[-1]     # Number of model parameters
+    eta_dim = eta.shape[-1]         # Number of nuisance parameters
     Nx, x_dim = d.shape             # Dimension of input
     y_dim = f.shape[-1]             # Dimension of output
-    dtheta = pert * theta
+    p = np.concatenate((theta, eta), axis=-1).astype(np.float32)   # (*, theta_dim + eta_dim)
+    dp = pert * p
+    dp[dp == 0] = pert  # arbitrary step size of pert if p=0
 
-    # Return a Jacobian (y_dim, theta_dim) at locations (*, Nx)
+    # Return a Jacobian (y_dim, theta_dim+eta_dim) at locations (*, Nx)
     J = 0
     if len(shape) == 1:
-        J = np.zeros((Nx, y_dim, theta_dim))
+        J = np.zeros((Nx, y_dim, theta_dim+eta_dim))
     elif len(shape) > 1:
-        J = np.zeros((*(shape[:-1]), Nx, y_dim, theta_dim))
+        J = np.zeros((*(shape[:-1]), Nx, y_dim, theta_dim+eta_dim))
     ind = tuple([slice(None)] * len(shape))  # (*)
 
-    for k in range(theta_dim):
+    for k in range(theta_dim+eta_dim):
         # Center difference scheme to approximate partial derivatives
-        theta_forward = np.copy(theta)
-        theta_backward = np.copy(theta)
-        theta_forward[(*ind, k)] += dtheta[(*ind, k)]
-        theta_backward[(*ind, k)] -= dtheta[(*ind, k)]
-        f1 = func(d, theta_forward, eta)    # (*, Nx, y_dim)
-        f2 = func(d, theta_backward, eta)   # (*, Nx, y_dim)
-        J[(*ind, slice(None), k)] = (f1 - f2) / (2*np.expand_dims(dtheta[(*ind, k)], axis=-1))
+        p_forward = np.copy(p)
+        p_backward = np.copy(p)
+        p_forward[(*ind, k)] += dp[(*ind, k)]
+        p_backward[(*ind, k)] -= dp[(*ind, k)]
+        f1 = func(d, p_forward[..., 0:theta_dim], p_forward[..., theta_dim:])       # (*, Nx, y_dim)
+        f2 = func(d, p_backward[..., 0:theta_dim], p_backward[..., theta_dim:])     # (*, Nx, y_dim)
+        J[(*ind, slice(None), k)] = (f1 - f2) / (2*np.expand_dims(dp[(*ind, k)], axis=-1))
 
     return J
 
@@ -214,44 +217,6 @@ def approx_hessian(func, d, theta, eta=None, pert=0.01):
             H[(*ind, j, i)] = np.squeeze(res, axis=-1)
 
     return H
-
-
-def linear_eig(A, sigma, gamma):
-    """Computes the analytical expected information gain for a linear gaussian model
-    Model: Y = A*theta + c + xi,  where
-           A -> system matrix
-           theta -> model parameters, theta ~ N(mu, sigma)
-           c -> constant offset
-           xi -> experimental noise, xi ~ N(b, gamma)
-    Parameters
-    ----------
-    A: (*, y_dim, theta_dim) System matrices of length * and shape (y_dim, theta_dim)
-    sigma: (*, theta_dim, theta_dim) Prior covariance matrix on model parameters
-    gamma: (*, y_dim, y_dim) Experimental noise covariance
-
-    Returns
-    -------
-    eig: (*,) The expected information gain for each system
-    """
-    A = np.atleast_1d(A)
-    sigma = np.atleast_1d(sigma)
-    gamma = np.atleast_1d(gamma)
-    if len(A.shape) == 2:
-        shape = (1,)
-        A = np.expand_dims(A, axis=0)
-        sigma = np.expand_dims(sigma, axis=0)
-        gamma = np.expand_dims(gamma, axis=0)
-    else:
-        shape = A.shape[:-2]
-    A_T = np.transpose(A, axes=tuple([0]*len(shape)) + (-1, -2))
-
-    # Posterior covariance
-    C_inv = np.linalg.inv(A @ sigma @ A_T + gamma)
-    sigma_post = sigma - sigma @ A_T @ C_inv @ A @ sigma    # (*, theta_dim, theta_dim)
-
-    # Compute expected information gain
-    eig = (1/2) * np.log(np.linalg.det(sigma) / np.linalg.det(sigma_post))  # (*,)
-    return eig
 
 
 def get_cycle(cmap, N=None, use_index="auto"):
