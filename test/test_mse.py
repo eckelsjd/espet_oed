@@ -7,10 +7,10 @@ import logging
 import time
 import sys
 sys.path.append('..')
-from src.utils import linear_eig, ax_default, get_cycle, fix_input_shape, electrospray_samplers
+from src.utils import ax_default, get_cycle, fix_input_shape, electrospray_samplers
 from src.models import linear_gaussian_model, custom_nonlinear, electrospray_current_model
 from src.nmc import eig_nmc_pm
-from src.lg import eig_lg
+from src.lg import eig_lg, linear_eig
 
 
 def test_lg(model='nonlinear'):
@@ -94,19 +94,21 @@ def test_nmc(model='linear'):
         Nx = 50
         d = np.linspace(800, 1845, Nx)
         theta_sampler, eta_sampler = electrospray_samplers()
-        model_func = lambda *args, **kwargs: electrospray_current_model(*args, **kwargs, gpu=True)
-        N = 2000  # 10000
-        M = 1500  # 500
-        Nr = 20  # 20
+        # model_func = lambda *args, **kwargs: electrospray_current_model(*args, **kwargs, gpu=True)
+        model_func = electrospray_current_model
+        N = 30  # 10000
+        M = 100  # 500
+        Nr = 5  # 20
         bs = 1  # 50
+        n_jobs = -1
         exp_data = np.loadtxt('../data/training_data.txt', dtype=np.float32, delimiter='\t')
         gamma = np.mean(exp_data[2, :])
         t1 = time.time()
         eig_estimate = np.zeros((Nr, Nx))
-        with Parallel(n_jobs=-1, verbose=9) as ppool:
+        with Parallel(n_jobs=n_jobs, verbose=9, backend='threading') as ppool:
             for i in range(Nr):
                 eig = eig_nmc_pm(d, theta_sampler, eta_sampler, model_func, N=N, M1=M, M2=M, noise_cov=gamma,
-                                 reuse_samples=False, n_jobs=-1, batch_size=bs, replicates=1, ppool=ppool)
+                                 reuse_samples=False, n_jobs=n_jobs, batch_size=bs, replicates=1, ppool=ppool)
                 eig_estimate[i, :] = np.squeeze(eig, axis=0)
         t2 = time.time()
         print(f'Total time for N={N} M={M} Nr={Nr} bs={bs}: {t2-t1:.02} s')
@@ -309,7 +311,7 @@ def test_truth():
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    # test_nmc(model='electrospray')
+    test_nmc(model='electrospray')
     # plot_nmc(model='nonlinear')
     # test_lg(model='nonlinear')
-    test_truth()
+    # test_truth()
