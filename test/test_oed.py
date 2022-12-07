@@ -144,7 +144,7 @@ def test_2d_nonlinear_model():
     plt.show()
 
 
-def test_array_current_model(dim=1):
+def test_array_current_model():
     # Get samplers
     theta_sampler, eta_sampler = electrospray_samplers()
 
@@ -153,56 +153,29 @@ def test_array_current_model(dim=1):
     var = np.mean(exp_data[2, :])
 
     # Set sample sizes
-    N = 100
-    Nx = 50
-    M = 10
+    N = 200
+    Nx = 15
+    M = 200
     n_jobs = -1
-    bs = 10
-    Nr = 10
+    bs = 1
+    Nr = 4
+    sl = slice(0, -1)
+    x_loc = np.linspace(800, 1845, Nx).reshape((Nx, 1))
+    d = np.squeeze(x_loc)
+    eig_estimate = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, electrospray_current_model, N=N, M1=M, M2=M,
+                     noise_cov=var, reuse_samples=False, n_jobs=n_jobs, batch_size=bs, replicates=Nr)
+    eig_lb_pm = np.nanpercentile(eig_estimate, 5, axis=0)
+    eig_med_pm = np.nanpercentile(eig_estimate, 50, axis=0)
+    eig_ub_pm = np.nanpercentile(eig_estimate, 95, axis=0)
 
-    if dim == 1:
-        x_loc = np.linspace(800, 1845, Nx).reshape((Nx, 1))
-        d = np.squeeze(x_loc)
-        eig_estimate = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, electrospray_current_model, N=N, M1=M, M2=M,
-                         noise_cov=var, reuse_samples=False, n_jobs=n_jobs, batch_size=bs, replicates=Nr)
-        eig_lb_pm = np.nanpercentile(eig_estimate, 5, axis=0)
-        eig_med_pm = np.nanpercentile(eig_estimate, 50, axis=0)
-        eig_ub_pm = np.nanpercentile(eig_estimate, 95, axis=0)
-
-        fig, ax = plt.subplots()
-        ax.plot(d, eig_med_pm, '-r', label=r'Marginal p($\theta$)')
-        ax.fill_between(d, eig_lb_pm, eig_ub_pm, alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
-        ax.set_ylim(bottom=-0.01)
-        ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain')
-        fig.set_size_inches(4.8, 3.6)
-        fig.tight_layout()
-        plt.show()
-
-    if dim == 2:
-        Ngrid = [Nx, Nx]
-        loc = [np.linspace(1000, 1840, n) for n in Ngrid]
-        pt_grids = np.meshgrid(*loc)
-        x_loc = np.vstack([grid.ravel() for grid in pt_grids]).T  # (np.prod(Nx), x_dim)
-        noise_cov = np.eye(2)*var
-        model_func = lambda x, theta, eta: model_1d_batch(x, theta, eta, electrospray_current_model)
-        eig = eig_nmc_pm(x_loc, theta_sampler, eta_sampler, model_func, N=N, M1=M1, M2=M2,
-                         noise_cov=noise_cov, reuse_samples=True, n_jobs=n_jobs)
-
-        # Reform grids
-        grid_d1, grid_d2 = [x_loc[:, i].reshape((Ngrid[1], Ngrid[0])) for i in range(2)]  # reform grids
-        eig_grid = eig.reshape((Ngrid[1], Ngrid[0]))
-
-        # Plot results
-        plt.figure()
-        c = plt.contourf(grid_d1, grid_d2, eig_grid, 60, cmap='jet')
-        plt.colorbar(c)
-        plt.cla()
-        plt.contour(grid_d1, grid_d2, eig_grid, 15, cmap='jet')
-        plt.xlabel('$Voltage 1 [V]$')
-        plt.ylabel('$Voltage 2 [V]$')
-        plt.show()
-
-        return eig
+    fig, ax = plt.subplots()
+    ax.plot(d[sl], eig_med_pm[sl], '-r')
+    ax.fill_between(d[sl], eig_lb_pm[sl], eig_ub_pm[sl], alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
+    ax.set_ylim(bottom=-0.01)
+    ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=False)
+    fig.set_size_inches(4.8, 3.6)
+    fig.tight_layout()
+    plt.show()
 
 
 def test_custom_nonlinear():
@@ -292,5 +265,5 @@ if __name__ == '__main__':
     # test_linear_gaussian_model(estimator='nmc')
     # test_custom_nonlinear()
     # test_1d_nonlinear_model()
-    # test_array_current_model(dim=1)
-    test_lg(model='nonlinear')
+    test_array_current_model()
+    # test_lg(model='nonlinear')

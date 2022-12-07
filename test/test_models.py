@@ -2,8 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-from src.models import linear_gaussian_model, custom_nonlinear
-from src.utils import get_cycle
+from src.models import linear_gaussian_model, custom_nonlinear, electrospray_current_model
+from src.utils import get_cycle, electrospray_samplers, ax_default
 
 
 def test_linear_gaussian_model():
@@ -78,6 +78,39 @@ def test_nonlinear_model():
     plt.show()
 
 
+def test_electrospray():
+    # Model inputs
+    Nr = 100
+    Nx = 50
+    theta_sampler, eta_sampler = electrospray_samplers()
+    theta0 = np.array([2.57, 1.69e-2, 2e-5]).reshape((1, 1, 3))
+    eta = eta_sampler((Nr, 1))
+    x_loc = np.linspace(800, 1845, Nx).reshape((Nx, 1))
+
+    # Compute model
+    y = electrospray_current_model(x_loc, theta0, eta)
+    yl = np.percentile(y, 5, axis=0).reshape((1, Nx))
+    ym = np.percentile(y, 50, axis=0).reshape((1, Nx))
+    yu = np.percentile(y, 95, axis=0).reshape((1, Nx))
+
+    # Experimental data
+    exp_data = np.loadtxt('../data/training_data.txt', dtype=np.float32, delimiter='\t')
+    v = exp_data[0, :]
+    current = exp_data[1, :]
+    var = exp_data[2, :]
+
+    # Plot
+    fig, ax = plt.subplots()
+    ax.fill_between(np.squeeze(x_loc), np.squeeze(yl), np.squeeze(yu), alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='gray')
+    ax.plot(np.squeeze(x_loc), np.squeeze(ym), '-k', label='Model')
+    ax.errorbar(v, current, yerr=2*np.sqrt(var), linestyle='-', color='red',
+                markersize=4, linewidth=1.3, capsize=2, label='Data')
+    ax_default(ax, xlabel='Voltage [V]', ylabel='Current [A]', legend=True)
+    fig.set_size_inches(4.8, 3.6)
+    fig.tight_layout()
+    plt.show()
+
+
 if __name__ == '__main__':
     plt.rc('font', family='serif')
     plt.rc('xtick', labelsize='small')
@@ -85,4 +118,5 @@ if __name__ == '__main__':
 
     # test_linear_gaussian_model()
     # test_nonlinear_model()
-    test_custom_nonlinear()
+    # test_custom_nonlinear()
+    test_electrospray()

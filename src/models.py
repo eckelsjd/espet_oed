@@ -222,7 +222,7 @@ def electrospray_current_model(x, theta, eta, gpu=False):
     # Extract material properties
     conductivity = eta[..., 1, lp.newaxis]
     surface_tension = eta[..., 2, lp.newaxis]
-    density = eta[..., 2, lp.newaxis]
+    density = eta[..., 3, lp.newaxis]
     viscosity = eta[..., 4, lp.newaxis]
 
     # Extract beam properties

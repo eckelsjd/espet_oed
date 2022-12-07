@@ -14,7 +14,7 @@ from src.nmc import eig_nmc_pm
 def test_nmc_truth(iter):
     """Test nmc estimators on electrospray model"""
     # Testing parameters
-    Nr = 15
+    Nr = 10
     N = 3000
     M = 2000
     bs = 1

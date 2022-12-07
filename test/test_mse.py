@@ -127,8 +127,6 @@ def test_nmc(model='linear'):
         fig.tight_layout()
         plt.show()
         fig.savefig(str(Path('../results/figs') / f'nmc_{model}_eig_truth.png'), dpi=300, format='png')
-        return
-
     else:
         raise NotImplementedError('Not working with whatever model you specified')
 
@@ -173,16 +171,25 @@ def plot_nmc(model='linear', estimator='nmc'):
     data = np.load(str(Path('../results')/f'{estimator}_{model}.npz'))
 
     eig_store = data['eig']
-    eig_truth = data['eig_truth']
+    N_est, N_cost, N_MC, Nx = eig_store.shape
+    eig_truth = np.nanmean(data['eig_truth'], axis=0).reshape((1, Nx))
     N_to_M = data['N2M']
     d = data['d']
     cost = data['cost']
-    N_est, N_cost, N_MC, Nx = eig_store.shape
 
     # Percentiles over MC replicates
     eig_lb = np.nanpercentile(eig_store, 5, axis=-2)
     eig_med = np.nanpercentile(eig_store, 50, axis=-2)
     eig_ub = np.nanpercentile(eig_store, 95, axis=-2)  # (N_est, N_cost, Nx)
+
+    # Slice bad data
+    sl = slice(0, -2)
+    eig_lb = eig_lb[..., sl]
+    eig_med = eig_med[..., sl]
+    eig_ub = eig_ub[..., sl]
+    d = d[..., sl]
+    eig_truth = eig_truth[..., sl]
+    eig_store = eig_store[..., sl]
 
     # Plot EIG results
     fig, axs = plt.subplots(N_est, N_cost, sharex='col', sharey='row')
@@ -219,7 +226,7 @@ def plot_nmc(model='linear', estimator='nmc'):
     fig.text(0.02, 0.5, r'Expected information gain', va='center', fontweight='bold', rotation='vertical')
     fig.set_size_inches(N_cost*2.5, N_est*2.5)
     fig.tight_layout(pad=3, w_pad=1, h_pad=1)
-    fig.savefig(str(Path('../results/figs') / f'{estimator}_{model}_N2M_cost_eig.png'), dpi=100, format='png')
+    fig.savefig(str(Path('../results/figs') / f'{estimator}_{model}_N2M_cost_eig.png'), dpi=200, format='png')
     plt.show()
 
     # Plot MSE log plot
@@ -235,6 +242,7 @@ def plot_nmc(model='linear', estimator='nmc'):
     #                  markersize=0, linewidth=1.5, capsize=2, label=label)
 
     # Plot Bias, variance, MSE
+    Nx = eig_truth.shape[-1]
     bias = np.nanmean(eig_store - eig_truth.reshape((1, 1, 1, Nx)), axis=-2)    # (N_est, N_cost, Nx)
     var = np.nanvar(eig_store, axis=-2)                                         # (N_est, N_cost, Nx)
     mse = bias ** 2 + var                                                       # (N_est, N_cost, Nx)
@@ -289,7 +297,7 @@ def plot_nmc(model='linear', estimator='nmc'):
 
 
 def test_truth():
-    data = np.load(str(Path('../results') / f'nmc_electrospray_eig_truth.npz'))
+    data = np.load(str(Path('../results') / f'nmc_electrospray_truth.npz'))
     d = data['d']
     eig_estimate = data['eig_truth']
     eig_lb_pm = np.nanpercentile(eig_estimate, 5, axis=0)
@@ -311,7 +319,7 @@ def test_truth():
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    test_nmc(model='electrospray')
-    # plot_nmc(model='nonlinear')
+    # test_nmc(model='electrospray')
+    plot_nmc(model='electrospray')
     # test_lg(model='nonlinear')
     # test_truth()

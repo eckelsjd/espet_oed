@@ -14,7 +14,7 @@ from src.nmc import eig_nmc_pm
 def test_nmc_n2m(iter, N_to_M):
     """Test nmc estimators on electrospray model"""
     # Testing parameters
-    N_MC = 50                                   # number of MC replicates
+    N_MC = 25                                   # number of MC replicates
     N_cost = 6                                  # number of total costs (i.e. number of model evaluations)
     cost = np.floor(np.logspace(4, 6, N_cost))
 
