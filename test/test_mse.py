@@ -10,25 +10,24 @@ sys.path.append('..')
 from src.utils import ax_default, get_cycle, fix_input_shape, electrospray_samplers
 from src.models import linear_gaussian_model, custom_nonlinear, electrospray_current_model
 from src.nmc import eig_nmc_pm
-from src.lg import eig_lg, linear_eig
+from src.lg import eig_lg, eig_lg_marg, linear_eig
 
 
-def test_lg(model='nonlinear'):
+def test_lg_nonlinear():
     Nx = 50
+    theta_mean = np.array([0.5])
+    eta = np.array([0.5])
+    theta_var = 0.25 ** 2
+    eta_var = 0.25 ** 2
+    noise_cov = 0.01
+    x = np.linspace(0, 1, Nx)
+    model_func = custom_nonlinear
 
-    if model == 'nonlinear':
-        theta_mean = np.array([0.5])
-        eta = np.array([0.5])
-        theta_var = 0.25 ** 2
-        noise_cov = 0.01
-        x = np.linspace(0, 1, Nx)
-        model_func = custom_nonlinear
-
-        # Compute eig
-        eig_estimate = eig_lg(x, model_func, theta_mean, theta_var, eta, noise_cov)
+    # Compute eig
+    eig_estimate = eig_lg_marg(x, model_func, theta_mean, theta_var, eta, eta_var, noise_cov)
 
     # Compare to ground truth
-    data = np.load(str(Path('../results') / f'nmc_{model}.npz'))
+    data = np.load(str(Path('../results') / f'nmc_nonlinear.npz'))
     eig_truth = data['eig_truth']  # (1, Nx)
     mse = np.mean((eig_estimate - eig_truth)**2)
     print(f'MSE of LG estimate: {mse}')
@@ -41,7 +40,7 @@ def test_lg(model='nonlinear'):
     ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
     fig.set_size_inches(4.8, 3.6)
     plt.tight_layout()
-    fig.savefig(str(Path('../results/figs') / 'nonlinear_lg_eig.png'), dpi=300, format='png')
+    fig.savefig(str(Path('../results/figs') / 'nonlinear_lg.png'), dpi=300, format='png')
     plt.show()
 
 
@@ -203,7 +202,7 @@ def plot_nmc(model='linear', estimator='nmc'):
             ax_default(axs[i, j], legend=False)
             axs[i, j].set_xbound(lower=np.min(d), upper=np.max(d))
             axs[i, j].set_ybound(lower=0)
-            axs[i, j].xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+            axs[i, j].xaxis.set_major_formatter(FormatStrFormatter('%d'))
             axs[i, j].yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
             axs[i, j].grid()
 
@@ -225,7 +224,7 @@ def plot_nmc(model='linear', estimator='nmc'):
     fig.text(0.5, 0.02, r'Operating condition $d$', ha='center', fontweight='bold')
     fig.text(0.02, 0.5, r'Expected information gain', va='center', fontweight='bold', rotation='vertical')
     fig.set_size_inches(N_cost*2.5, N_est*2.5)
-    fig.tight_layout(pad=3, w_pad=1, h_pad=1)
+    fig.tight_layout(pad=4, w_pad=1.4, h_pad=1.4)
     fig.savefig(str(Path('../results/figs') / f'{estimator}_{model}_N2M_cost_eig.png'), dpi=200, format='png')
     plt.show()
 
@@ -268,7 +267,7 @@ def plot_nmc(model='linear', estimator='nmc'):
         # Plot variance
         label = f"{int(nm_ratio)}:1" if nm_ratio >= 1 else f"1:{int(1 / nm_ratio)}"
         var_mean = np.nanmean(var, axis=-1)     # (N_est, N_cost)
-        axs[1].plot(cost[i, :], var_mean[i, :], linestyle='-', markersize=4, linewidth=1.3)
+        axs[1].plot(cost[i, :], var_mean[i, :], linestyle='-', markersize=4, linewidth=1.3, label=label)
         axs[1].set_ylabel(r'Estimator variance')
         # nx_var = np.nanvar(var, axis=-1)        # (N_est, N_cost)
         # std_err = np.sqrt(nx_var / Nx)
@@ -320,6 +319,6 @@ def test_truth():
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     # test_nmc(model='electrospray')
-    plot_nmc(model='electrospray')
-    # test_lg(model='nonlinear')
+    # plot_nmc(model='nonlinear')
+    test_lg_nonlinear()
     # test_truth()

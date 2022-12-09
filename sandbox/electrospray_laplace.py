@@ -8,7 +8,7 @@ from joblib import Parallel, delayed
 from src.utils import laplace_approx, batch_normal_pdf, electrospray_samplers, approx_hessian, batch_normal_sample
 from src.utils import nearest_positive_definite, is_positive_definite, ax_default
 from src.models import electrospray_current_model
-from src.lg import eig_lg
+from src.lg import eig_lg, eig_lg_marg
 
 
 def electrospray_log_posterior(theta, eta, x, y, noise_var):
@@ -74,62 +74,53 @@ def test_laplace():
         sigma = nearest_positive_definite(sigma)
         print(f'Sigma closest: {sigma}')
 
-    # Compute linear gaussian estimate
-    theta_mean = np.broadcast_to(map, (Nr, 1, 3))   # (Nr, 1, theta_dim)
-    eta_mean = np.expand_dims(eta, axis=1)          # (Nr, 1, eta_dim)
-    theta_cov = sigma                               # (theta_dim, theta_dim)
-    # geo_cov = np.broadcast_to(np.array([0.25e-5, 5.23e-6, 3.596e-6, 4e-3, 5.13e-6, 7.5e-8]), (576, 6)).reshape((576*6,))
-    # eta_cov = np.concatenate((np.array([6.04e-15, 0.06075, 0.0105e-2, 0.001e3, 0.201, 1.003e4]), geo_cov))  # (4039, )
-    # eta_cov = np.diag(eta_cov)  # (4039, 4039)
-    # eta_mean = np.concatenate((np.array([1.51e-13, 1.5115, 5.024e-2, 1.282e3, 3.014e-2, 5.5e5]),
-    #                            np.broadcast_to(np.array([]), (576, 6)).reshape((576*6,))))
     Nx = 50
     x = np.linspace(800, 1845, Nx)
     noise_cov = np.mean(vardata)
     gamma = noise_cov * np.eye(1)
     model_func = electrospray_current_model
-    data = np.load(str(Path('../results') / f'nmc_electrospray_eig_truth.npz'))
+    data = np.load(str(Path('../results') / f'nmc_electrospray_truth.npz'))
     eig_exact = np.nanmean(data['eig_truth'], axis=0).reshape((Nx,))
+    theta_mean = np.broadcast_to(map, (Nr, 1, 3))  # (Nr, 1, theta_dim)
+    eta_mean = np.expand_dims(eta, axis=1)  # (Nr, 1, eta_dim)
+    theta_cov = sigma  # (theta_dim, theta_dim)
 
-    # eig_estimate = np.zeros((Nr, Nx))
-    # def parallel_func(idx):
-    #     eig_estimate[idx, :] = eig_lg_marg(x, model_func, theta_mean[idx, ...], theta_cov, eta_mean[idx, ...], eta_cov, gamma)
-    # with Parallel(n_jobs=-1, verbose=9) as ppool:
-    #     ppool(delayed(parallel_func)(idx) for idx in range(Nr))
+    # Compute linear gaussian estimate
+    marg = False
+    if marg:
+        geo_cov = np.broadcast_to(np.array([0.25e-5, 5.23e-6, 3.596e-6, 4e-3, 5.13e-6, 7.5e-8, 0]), (576, 7)).reshape(
+            (576 * 7,))
+        eta_cov = np.concatenate((np.array([6.04e-15, 0.06075, 0.0105e-2, 0.001e3, 0.201, 1.003e4]), geo_cov))  # (4038, )
+        eta_cov = np.diag(eta_cov)  # (4038, 4038)
+        # eta_mean = np.concatenate((np.array([1.51e-13, 1.5115, 5.024e-2, 1.282e3, 3.014e-2, 5.5e5]),
+        #                            np.broadcast_to(np.array([]), (576, 6)).reshape((576*6,))))
+        eig_estimate = np.zeros((Nr, Nx))
 
-    eig_estimate = eig_lg(x, model_func, theta_mean, theta_cov, eta_mean, gamma)  # (Nr, Nx)
+        def parallel_func(idx):
+            eig_estimate[idx, :] = eig_lg_marg(x, model_func, theta_mean[idx, ...], theta_cov, eta_mean[idx, ...],
+                                               eta_cov, gamma)
+
+        with Parallel(n_jobs=-1, verbose=9) as ppool:
+            ppool(delayed(parallel_func)(idx) for idx in range(Nr))
+    else:
+        eig_estimate = eig_lg(x, model_func, theta_mean, theta_cov, eta_mean, gamma)  # (Nr, Nx)
 
     eig_lb = np.nanpercentile(eig_estimate, 5, axis=0)
     eig_med = np.nanpercentile(eig_estimate, 50, axis=0)
     eig_ub = np.nanpercentile(eig_estimate, 95, axis=0)
 
     fig, ax = plt.subplots()
-    sl = slice(0, -1)
-    ax.plot(x[sl], eig_exact[sl], '-k', label='Exact')
-    ax.plot(x[sl], eig_med[sl], '-r', label='Estimate')
+    sl = slice(0, -2)
+    ax.plot(x[sl], eig_exact[sl], '-k', label='Ground truth')
+    ax.plot(x[sl], eig_med[sl], '-r', label='Linear Gaussian')
     ax.fill_between(x[sl], eig_lb[sl], eig_ub[sl], alpha=0.3, edgecolor=(0.5, 0.5, 0.5), facecolor='red')
+    ax.set_xlim(left=800, right=1800)
+    ax.set_ylim(bottom=-0.003)
     ax_default(ax, xlabel='Operating condition $d$', ylabel='Expected information gain', legend=True)
     fig.set_size_inches(4.8, 3.6)
-    fig.tight_layout()
+    plt.tight_layout()
     plt.show()
-
-    # Ns = 10000
-    # samples = batch_normal_sample(map, sigma, size=Ns)  # (Ns, 3)
-    # fig = pygtc.plotGTC(np.squeeze(samples),
-    #                     # chainLabels=['$\\theta_1$', '$\\theta_2$'],
-    #                     paramNames=['$\\zeta_1$', '$\\zeta_2$', '$b_0$'],
-    #                     panelSpacing='loose',
-    #                     filledPlots=True,
-    #                     nContourLevels=3,
-    #                     nBins=int(0.05 * Ns),
-    #                     smoothingKernel=1.5,
-    #                     figureSize=4,
-    #                     plotDensity=True,
-    #                     colorsOrder=['greens', 'blues'],
-    #                     sigmaContourLevels=True
-    #                     )
-    # fig.tight_layout()
-    # plt.show()
+    fig.savefig(str(Path('../results/figs') / 'electrospray_lg.png'), dpi=300, format='png')
 
 
 if __name__ == '__main__':

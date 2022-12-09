@@ -17,3 +17,12 @@ Divergences:
 Other estimators
 - Gaussian approx + linearized model -> analytical solution
 - layered multiple importance sampling
+
+Limitations/surrogate:
+- formulation of 4039 nuisance parameters, should just have noise variance as nuisance, and the model should be stochastic
+- can't do this because the electrostatic model takes too long
+- refactor of r_pr, and E(s) distribution -- basically cite the better model and need for better E(s) surrogate
+- causes numerical issues with jacobian and linearization, need to do marginalization over p(phi|y) and assume phi independent of data
+- refactor likelihood model because of dependence of experimental noise on voltage
+- consider sequential design
+- consider design of geometries for calibrating the parameters

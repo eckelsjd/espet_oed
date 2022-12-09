@@ -219,6 +219,61 @@ def approx_hessian(func, d, theta, eta=None, pert=0.01):
     return H
 
 
+def hess(func, theta, pert=0.01):
+    """Approximate Hessian of the function at a specified theta location
+    Parameters
+    ----------
+    func: expects to be called as func(theta) -> (*, y_dim)
+    theta: (*, theta_dim) point to linearize model about
+    pert: Perturbation for approximate partial derivatives
+
+    Returns
+    -------
+    H: (*, theta_dim, theta_dim) The approximate Hessian (theta_dim, theta_dim) at locations (*)
+    """
+    theta = np.atleast_1d(theta)
+    shape = theta.shape[:-1]                # (*)
+    theta_dim = theta.shape[-1]             # Number of parameters
+    dtheta = pert * theta
+
+    # Return a Hessian (theta_dim, theta_dim) at locations (*)
+    H = np.zeros((*(shape[:-1]), theta_dim, theta_dim))
+
+    for i in range(theta_dim):
+        for j in range(i, theta_dim):
+            # Allocate space at 4 grid points (n1=-1, p1=+1)
+            theta_n1_n1 = np.copy(theta)
+            theta_p1_p1 = np.copy(theta)
+            theta_n1_p1 = np.copy(theta)
+            theta_p1_n1 = np.copy(theta)
+
+            # Perturbations to theta in each direction
+            theta_n1_n1[..., i] -= dtheta[..., i]
+            theta_n1_n1[..., j] -= dtheta[..., j]
+            f_n1_n1 = func(theta_n1_n1)
+
+            theta_p1_p1[..., i] += dtheta[..., i]
+            theta_p1_p1[..., j] += dtheta[..., j]
+            f_p1_p1 = func(theta_p1_p1)
+
+            theta_n1_p1[..., i] -= dtheta[..., i]
+            theta_n1_p1[..., j] += dtheta[..., j]
+            f_n1_p1 = func(theta_n1_p1)
+
+            theta_p1_n1[..., i] += dtheta[..., i]
+            theta_p1_n1[..., j] -= dtheta[..., j]
+            f_p1_n1 = func(theta_p1_n1)
+
+            res = (f_n1_n1 + f_p1_p1 - f_n1_p1 - f_p1_n1) / np.expand_dims(4 * dtheta[..., i] * dtheta[..., j],
+                                                                           axis=-1)
+
+            # Hessian only computed for scalar functions, y_dim=1 on last axis
+            H[..., i, j] = np.squeeze(res, axis=-1)
+            H[..., j, i] = np.squeeze(res, axis=-1)
+
+    return H
+
+
 def get_cycle(cmap, N=None, use_index="auto"):
     if isinstance(cmap, str):
         if use_index == "auto":
@@ -297,7 +352,7 @@ def autocorrelation(samples, maxlag=100, step=1):
     return lags, autos
 
 
-def laplace_approx(x0, logpost):
+def laplace_approx(x0, logpost, hess_custom=True):
     """Perform the laplace approximation, returning the MAP point and an approximation of the covariance
     :param x0: (nparam, ) array of initial parameters
     :param logpost: f(param) -> log posterior pdf
@@ -306,13 +361,19 @@ def laplace_approx(x0, logpost):
     :returns cov_approx: (nparam, nparam), covariance matrix for Gaussian fit at MAP
     """
     # Gradient free method to obtain optimum
-    neg_post = lambda x: -logpost(x)
-    res = scipy.optimize.minimize(neg_post, x0, method='Nelder-Mead')
-
-    # Gradient method which also approximates the inverse of the hessian
-    res = scipy.optimize.minimize(neg_post, res.x*0.95)
+    neg_logpost = lambda theta: -logpost(theta)
+    hess_inv = lambda theta: np.linalg.pinv(hess(neg_logpost, theta))
+    res = scipy.optimize.minimize(neg_logpost, x0, method='Nelder-Mead')
     map_point = res.x
-    cov_approx = res.hess_inv
+
+    if hess_custom:
+        cov_approx = hess_inv(map_point)
+    else:
+        # Gradient method which also approximates the inverse of the hessian
+        res = scipy.optimize.minimize(neg_logpost, res.x*0.95)
+        map_point = res.x
+        cov_approx = res.hess_inv
+
     return map_point, cov_approx
 
 

@@ -13,7 +13,7 @@ def dram(logpdf, x0, nsamples, prop_sampler, prop_logpdf, k0=100, gamma=0.5, eps
     :param prop_logpdf: f(x | y, *params) -> log PDF of x under proposal distribution given y and params
     """
     # Get dimension of parameters
-    x0 = np.squeeze(np.atleast_1d(x0))
+    x0 = np.atleast_1d(x0)
     assert len(x0.shape) == 1
     dim = x0.shape[0]
 
